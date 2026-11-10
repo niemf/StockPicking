@@ -148,13 +148,18 @@ def run_discovery(
     session: Session,
     *,
     quote_service: QuoteService | None = None,
+    quotes: dict | None = None,
     profile: dict | None = None,
     today: date | None = None,
     moment: datetime | None = None,
     persist: bool = True,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Run one full-market screen. Returns the funnel summary and top candidates."""
+    """Run one full-market screen. Returns the funnel summary and top candidates.
+
+    ``quotes`` can be passed in to reuse a snapshot already fetched for the
+    closing-bar update, avoiding a second full-market request.
+    """
     today = today or date.today()
     moment = moment or datetime.now()
     profile = profile or load_profile()
@@ -167,7 +172,8 @@ def run_discovery(
 
     codes = [stock.code for stock in stocks]
     quote_started = time.perf_counter()
-    quotes = (quote_service or QuoteService()).get_quotes(codes)
+    if quotes is None:
+        quotes = (quote_service or QuoteService()).get_quotes(codes)
     quote_seconds = time.perf_counter() - quote_started
 
     contexts = build_contexts(session, stocks, quotes, today=today, moment=moment)

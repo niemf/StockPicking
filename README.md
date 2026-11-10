@@ -196,21 +196,26 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 ## 全市场发现
 
-### 数据准备（首次一次）
+### 数据准备（只需一次）
 
 ```powershell
 # 1. 同步主板股票列表（含上市日期、ST 标记）
 & '.venv\python.exe' scripts\sync_universe.py
 
-# 2. 回补日线（320 天，8 线程；全市场约 5–10 分钟）
+# 2. 回补日线（320 天，8 线程；全市场约 8 分钟，仅首次需要）
 & '.venv\python.exe' scripts\backfill_bars.py
 ```
 
-日常增量（建议每个交易日 15:05 跑一次）：
+> 这一步是**一次性初始化**，不是每天运行。之后每天用收盘快照拼出当日 K 线，不再逐只请求历史。
+
+日常盘后（建议每个交易日 15:35 跑一次，约 10 秒）：
 
 ```powershell
-& '.venv\python.exe' scripts\backfill_bars.py --incremental
+& '.venv\python.exe' scripts\daily_update.py
 ```
+
+它会用一次批量收盘行情写入当日 K 线，然后直接跑全市场发现。建议每周日额外执行一次
+`scripts\backfill_bars.py --force`（约 8 分钟），修复除权除息造成的前复权衔接偏差。
 
 ### 运行发现
 
@@ -228,9 +233,7 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 ```powershell
 & '.venv\python.exe' scripts\daily_update.py
-```
-
-### 分层漏斗
+```### 分层漏斗
 
 | 阶段 | 内容 | 是否需要日线 |
 |---|---|---|
@@ -241,7 +244,7 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 | 5 | RSI12、MACD 多头、ATR 区间、20 日涨幅/回撤、低开 | 是 |
 | 6 | 趋势 / 量价 / 动量 / 相对强度 / 波动质量加权评分，取前 30 | 复用 |
 
-早期阶段淘汰的股票不会加载日线。实测：300 只试点约 2 秒；全市场在日线已缓存时约 10–20 秒。
+早期阶段淘汰的股票不会加载日线。实测：300 只试点约 2 秒；全市场在日线已缓存时约 4–12 秒（行情复用收盘快照时约 4 秒）。
 
 ### 策略配置
 
@@ -256,13 +259,28 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 > 已知限制：深市股票带行业字段，沪市交易所列表不含行业，因此部分沪市股票行业显示为“—”。后续可用东方财富行业板块接口批量补齐。
 
+## AI 使用与成本
+
+当前阶段（数据、指标、发现、预警）**不调用任何 AI**：`ai_call_log` 为 0 条，所有筛选、评分、通知都是本地确定性代码。慢的部分是网络取数，不是 AI。
+
+后续接入 DeepSeek 时按以下原则控制成本：
+
+- 只分析评分靠前的 10–30 只，绝不把全市场或原始 K 线发给模型；
+- 输入是压缩后的结构化 JSON（价格、均线、量比、RSI、ATR、评分、持仓/计划），单只约 1–2k tokens；
+- 每个交易日一次，盘中监控不调用 AI；
+- 结果按 `code + trade_date + prompt_version` 缓存，重跑不重复计费；
+- `ai_call_log` 记录 tokens 与费用，`AI_DAILY_BUDGET_CNY` 超预算直接拒绝调用；
+- AI 失败时使用规则兜底计划，不影响监控与发现。
+
+按 Top 20 估算，每日约 3–5 万输入 tokens + 1–2 万输出 tokens，成本远低于每天多次全量分析。
+
 ## 测试
 
 ```powershell
 & '.venv\python.exe' -m pytest
 ```
 
-当前 76 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排与日线存储。
+当前 77 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排与日线存储。
 
 ## 数据源验证
 

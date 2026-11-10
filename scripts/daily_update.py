@@ -1,9 +1,11 @@
-"""Daily post-close maintenance: update bars, then run discovery.
+"""Daily post-close maintenance: update today's bar, then run discovery.
 
 Schedule this at 15:35 on trading days (Windows Task Scheduler / cron):
     .venv\\python.exe scripts\\daily_update.py
 
-It is safe to re-run: bars are upserted and candidates for the day are replaced.
+By default the day's bar is built from one batch of closing quotes (2–4 s)
+instead of 3195 per-stock history requests. Run ``backfill_bars.py --force``
+weekly to repair forward-adjustment drift around ex-dividend dates.
 """
 
 from __future__ import annotations
@@ -21,16 +23,22 @@ from sqlalchemy import select  # noqa: E402
 from app.db.base import SessionLocal  # noqa: E402
 from app.db.models import Stock  # noqa: E402
 from app.providers.base import is_main_board  # noqa: E402
-from app.services.bars import incremental_bars  # noqa: E402
-from app.services.calendar import is_trading_day  # noqa: E402
+from app.services.bars import bars_from_snapshot, incremental_bars  # noqa: E402
+from app.services.calendar import is_trading_day, market_session  # noqa: E402
 from app.services.discovery import run_discovery  # noqa: E402
+from app.services.quotes import QuoteService  # noqa: E402
 from app.services.universe import sync_universe  # noqa: E402
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="盘后日线更新 + 全市场发现")
     parser.add_argument("--date", type=str, default="", help="指定交易日 YYYY-MM-DD（默认今天）")
-    parser.add_argument("--skip-bars", action="store_true", help="跳过日线增量")
+    parser.add_argument("--skip-bars", action="store_true", help="跳过日线更新")
+    parser.add_argument(
+        "--full-bars",
+        action="store_true",
+        help="逐只回补最近 12 天（较慢，除权修复用；日常不需要）",
+    )
     parser.add_argument("--skip-universe", action="store_true", help="跳过股票列表同步")
     parser.add_argument("--force", action="store_true", help="非交易日也执行")
     args = parser.parse_args()
@@ -46,19 +54,30 @@ def main() -> int:
             summary = sync_universe(session)
             print(f"股票池：新增 {summary['inserted']}，更新 {summary['updated']}")
 
-        if not args.skip_bars:
-            stocks = [
-                stock
-                for stock in session.scalars(select(Stock).where(Stock.status == "normal"))
-                if is_main_board(stock.code)
-            ]
-            stats = incremental_bars(session, [stock.code for stock in stocks])
-            print(
-                f"日线增量：写入 {stats['written']} 行，失败 {len(stats['failed'])} 只，"
-                f"耗时 {stats.get('elapsed_sec', 0)}s"
-            )
+        stocks = [
+            stock
+            for stock in session.scalars(select(Stock).where(Stock.status == "normal"))
+            if is_main_board(stock.code)
+        ]
+        codes = [stock.code for stock in stocks]
+        quotes = None
 
-        output = run_discovery(session, today=target)
+        if not args.skip_bars:
+            if args.full_bars:
+                stats = incremental_bars(session, codes)
+                print(
+                    f"日线增量（逐只）：写入 {stats['written']} 行，失败 {len(stats['failed'])} 只，"
+                    f"耗时 {stats.get('elapsed_sec', 0)}s"
+                )
+            elif market_session() != "after_close":
+                print("尚未收盘，跳过快照 K 线写入（收盘后再运行）。")
+            else:
+                quotes = QuoteService().get_quotes(codes)
+                written = bars_from_snapshot(session, quotes)
+                session.commit()
+                print(f"收盘快照 K 线：写入 {written} 只（未逐只请求）")
+
+        output = run_discovery(session, quotes=quotes, today=target)
         summary = output["summary"]
         print(
             f"发现完成：{summary['codes']} 只 -> {len(output['candidates'])} 只候选，"

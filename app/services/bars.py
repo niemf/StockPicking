@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.db.models import DailyBar
 from app.providers.akshare_provider import AkShareProvider
+from app.providers.base import Quote
 
 UPSERT_CHUNK = 90  # 10 columns * 90 rows stays below SQLite's variable limit
 BAR_COLUMNS = (
@@ -78,7 +79,10 @@ def upsert_bars(session: Session, code: str, df: pd.DataFrame) -> int:
     """Insert or update one stock's bars. Returns the number of rows written."""
     if df is None or df.empty:
         return 0
-    rows = _frame_rows(code, df)
+    return _write_rows(session, _frame_rows(code, df))
+
+
+def _write_rows(session: Session, rows: list[dict]) -> int:
     if not rows:
         return 0
 
@@ -110,6 +114,43 @@ def upsert_bars(session: Session, code: str, df: pd.DataFrame) -> int:
         for row in rows:
             session.merge(DailyBar(**row))
     return len(rows)
+
+
+def bars_from_snapshot(
+    session: Session,
+    quotes: dict[str, Quote],
+    *,
+    trade_date: date | None = None,
+) -> int:
+    """Append the closing snapshot as today's bar (one batch, no per-stock calls).
+
+    This replaces the daily per-stock history request. It is safe after the
+    close; during the session the values are partial and must not be stored.
+    A weekly ``backfill --force`` repairs any forward-adjustment drift caused by
+    ex-dividend dates.
+    """
+    rows: list[dict] = []
+    day = trade_date or date.today()
+    for quote in quotes.values():
+        if quote.price <= 0 or quote.open <= 0 or quote.high <= 0 or quote.low <= 0:
+            continue
+        bar_date = quote.ts.date() if quote.ts else day
+        rows.append(
+            {
+                "code": quote.code,
+                "trade_date": bar_date,
+                "open": float(quote.open),
+                "high": float(quote.high),
+                "low": float(quote.low),
+                "close": float(quote.price),
+                "pre_close": float(quote.pre_close) if quote.pre_close else None,
+                "volume": float(quote.volume),
+                "amount": float(quote.amount),
+                "turnover_rate": float(quote.turnover_rate) if quote.turnover_rate else None,
+                "adj_factor": 1.0,
+            }
+        )
+    return _write_rows(session, rows)
 
 
 def coverage(session: Session, codes: list[str] | None = None) -> dict[str, tuple[int, date | None]]:

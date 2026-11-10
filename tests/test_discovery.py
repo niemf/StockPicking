@@ -13,7 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.db.models import Candidate, DailyBar, JobRun, Stock
 from app.providers.base import Quote
-from app.services.bars import upsert_bars
+from app.services.bars import bars_from_snapshot, upsert_bars
 from app.services.discovery import load_bars_map, run_discovery, session_progress
 
 TODAY = date(2026, 11, 10)
@@ -135,6 +135,35 @@ def test_upsert_bars_is_idempotent(session) -> None:
         select(DailyBar.close).where(DailyBar.code == "600000").order_by(DailyBar.trade_date.desc()).limit(1)
     )
     assert latest == pytest.approx(123.45)
+
+
+def test_bars_from_snapshot_writes_one_row_per_stock(session) -> None:
+    upsert_bars(session, "600000", _bars("600000"))
+    session.commit()
+    before = session.scalar(select(func.count()).select_from(DailyBar))
+
+    quote = _quote("600000", 111.11, "测试股份")
+    quote.open = 110.0
+    quote.high = 112.0
+    quote.low = 109.0
+    quote.volume = 2_000_000.0
+    quote.amount = 220_000_000.0
+
+    written = bars_from_snapshot(session, {"600000": quote})
+    session.commit()
+
+    assert written == 1
+    # Same trade date is upserted, not appended.
+    assert session.scalar(select(func.count()).select_from(DailyBar)) == before
+    latest = session.scalar(
+        select(DailyBar)
+        .where(DailyBar.code == "600000")
+        .order_by(DailyBar.trade_date.desc())
+        .limit(1)
+    )
+    assert latest.close == pytest.approx(111.11)
+    assert latest.volume == pytest.approx(2_000_000.0)
+    assert latest.high == pytest.approx(112.0)
 
 
 def test_load_bars_map_groups_by_code(session) -> None:
