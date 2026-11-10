@@ -1,0 +1,30 @@
+# ===== Python =====
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ===== 环境与密钥 =====
+.env
+.env.local
+*.key
+
+# ===== 数据与日志 =====
+data/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ===== 临时文件 =====
+*.tmp
+*.log

@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">POSITIONS</p>
+    <h1>持仓</h1>
+    <p class="subtitle">成本、浮动盈亏、止盈止损距离与仓位分布。行情为实时接口，成本与计划为演示数据。</p>
+  </div>
+  <div class="page-head-actions">
+    <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+    <button class="btn btn-primary" type="button" disabled>+ 记录交易（待接入）</button>
+  </div>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">持仓总市值</span>
+    <strong class="stat-value">¥{{ totals.market_value | money }}</strong>
+    <span class="stat-sub">{{ totals.count }} 只股票</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">持仓成本</span>
+    <strong class="stat-value">¥{{ totals.cost_value | money }}</strong>
+    <span class="stat-sub">加权平均成本</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">浮动盈亏</span>
+    <strong class="stat-value {{ totals.trend }}">{{ totals.pnl | money }}</strong>
+    <span class="stat-sub {{ totals.trend }}">{{ totals.pnl_pct | pct }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">今日盈亏</span>
+    <strong class="stat-value {{ totals.today_trend }}">{{ totals.today_pnl | money }}</strong>
+    <span class="stat-sub">按最新价与昨收计算</span>
+  </article>
+</section>
+
+<div class="dashboard-grid">
+  <div class="stack">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>持仓明细</h2>
+          <p>止损、止盈与浮盈进度</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="data-table holdings-table">
+          <thead>
+            <tr>
+              <th>股票</th>
+              <th>现价 / 成本</th>
+              <th>持仓 / 可用</th>
+              <th>市值</th>
+              <th>浮动盈亏</th>
+              <th>今日盈亏</th>
+              <th>止损 / 止盈</th>
+              <th>止盈进度</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in items %}
+            <tr>
+              <td>
+                <a class="stock-cell" href="/stock/{{ item.code }}">
+                  <strong>{{ item.name }}</strong>
+                  <small>{{ item.code }} · {{ item.industry }}</small>
+                </a>
+              </td>
+              <td>
+                <span class="{{ item.trend }}">{{ item.price | price }}</span>
+                <small>成本 {{ item.cost | price }}</small>
+              </td>
+              <td>
+                <span>{{ item.shares }} 股</span>
+                <small>可用 {{ item.shares }} 股</small>
+              </td>
+              <td>¥{{ item.market_value | money }}</td>
+              <td class="{{ item.pnl_trend }}">
+                <strong>{{ item.pnl | money }}</strong>
+                <small>{{ item.pnl_pct | pct }}</small>
+              </td>
+              <td class="{{ item.today_trend }}">
+                <strong>{{ item.today_pnl | money }}</strong>
+                <small>当日</small>
+              </td>
+              <td>
+                <span class="down">{{ item.stop_loss | price }}</span>
+                <small>止盈 {{ item.take_profit_1 | price }} / {{ item.take_profit_2 | price }}</small>
+              </td>
+              <td class="progress-cell">
+                <div class="mini-bar"><span style="width: {{ item.progress }}%"></span></div>
+                <small>距止损 {{ '%.2f' | format(item.stop_distance) }}% · 距止盈一 {{ '%.2f' | format(item.tp1_distance) }}%</small>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>持仓盈亏贡献</h2>
+          <p>单位：元</p>
+        </div>
+      </div>
+      <div id="holdings-bar" class="chart"></div>
+    </section>
+  </div>
+
+  <aside class="stack">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>仓位分布</h2>
+          <p>按当前市值</p>
+        </div>
+      </div>
+      <div id="holdings-pie" class="chart chart-sm"></div>
+    </section>
+
+    <section class="panel regime-panel">
+      <div class="panel-head">
+        <div>
+          <h2>风控提示</h2>
+          <p>规则引擎建议</p>
+        </div>
+        <span class="regime-pill {{ regime.regime }}">{{ regime.label }}</span>
+      </div>
+      <ul class="reason-list">
+        <li>单票仓位上限 15%，当前最大持仓为{{ concentration.max_name }}，占比约 {{ '%.1f' | format(concentration.max_pct) }}%。</li>
+        <li>白酒行业合计占比约 {{ '%.1f' | format(concentration.liquor_pct) }}%，注意行业集中度。</li>
+        <li>中国平安距止损 {{ '%.2f' | format(concentration.pingan_stop_distance) }}%，建议关注 MA20 得失。</li>
+      </ul>
+      <div class="advice">{{ regime.position_advice }}</div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>止盈止损规则</h2>
+          <p>当前生效的持仓计划</p>
+        </div>
+      </div>
+      <div class="rule-list">
+        {% for item in items %}
+        <div class="rule-row">
+          <div>
+            <strong>{{ item.name }}</strong>
+            <small>计划 {{ item.plan_id }}</small>
+          </div>
+          <div class="rule-values">
+            <span class="down">止损 {{ item.stop_loss | price }}</span>
+            <span class="up">止盈 {{ item.take_profit_1 | price }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const chartItems = {{ chart_items | tojson }};
+
+  function initCharts() {
+    if (!window.echarts) return;
+
+    const pieEl = document.getElementById('holdings-pie');
+    if (pieEl) {
+      const chart = echarts.init(pieEl);
+      chart.setOption({
+        tooltip: { trigger: 'item', formatter: '{b}<br/>¥{c} ({d}%)' },
+        legend: { bottom: 0, icon: 'circle', textStyle: { color: '#7b8499', fontSize: 11 } },
+        color: ['#2563eb', '#7c3aed', '#0ea5e9', '#f59e0b'],
+        series: [{
+          type: 'pie',
+          radius: ['48%', '72%'],
+          center: ['50%', '44%'],
+          itemStyle: { borderColor: '#fff', borderWidth: 3 },
+          label: { show: false },
+          data: chartItems.map(item => ({ name: item.name, value: Math.round(item.market_value) }))
+        }]
+      });
+      window.addEventListener('resize', () => chart.resize());
+    }
+
+    const barEl = document.getElementById('holdings-bar');
+    if (barEl) {
+      const chart = echarts.init(barEl);
+      chart.setOption({
+        grid: { left: 8, right: 24, top: 24, bottom: 8, containLabel: true },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: '{b}<br/>¥{c}' },
+        xAxis: {
+          type: 'value',
+          splitLine: { lineStyle: { color: '#eef1f7' } },
+          axisLabel: { color: '#8a93a6' }
+        },
+        yAxis: {
+          type: 'category',
+          data: chartItems.map(item => item.name),
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: { color: '#5d667a' }
+        },
+        series: [{
+          type: 'bar',
+          barWidth: 16,
+          data: chartItems.map(item => ({
+            value: Math.round(item.pnl),
+            itemStyle: { color: item.pnl >= 0 ? '#e5484d' : '#12a150', borderRadius: 4 }
+          })),
+          label: {
+            show: true,
+            position: 'right',
+            color: '#5d667a',
+            formatter: params => params.value >= 0 ? `+${params.value}` : `${params.value}`
+          }
+        }]
+      });
+      window.addEventListener('resize', () => chart.resize());
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCharts);
+  } else {
+    initCharts();
+  }
+</script>
+{% endblock %}
