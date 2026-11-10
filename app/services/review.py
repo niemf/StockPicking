@@ -1,31 +1,107 @@
-"""Daily review: deterministic structured summary plus an optional AI narrative."""
+"""Daily review: market, watchlist, holdings, sector flow, LHB and operations.
+
+Structured numbers come from local data; AI only writes the narrative. The
+candidate pool is intentionally excluded from this report.
+"""
 
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db.models import AlertEvent, Candidate, Holding, ReviewReport
+from app.db.models import AlertEvent, Holding, HoldingTransaction, ReviewReport
 from app.demo_data import INDICES, MARKET_REGIME
 from app.services.ai import AIError, DeepSeekClient
+from app.services.market_flow import get_lhb, get_sector_flow
 from app.services.portfolio import holding_items, watch_items
 from app.services.quotes import QuoteService
 
 REVIEW_SYSTEM_PROMPT = """你是 A 股复盘助手。只根据输入的结构化数据写复盘，不得编造数据。
 只输出 JSON，字段：
-market_narrative, watch_narrative, holding_narrative, candidates_narrative,
+market_narrative, watch_narrative, holding_narrative, sector_narrative,
+lhb_narrative, operation_narrative,
 tomorrow_focus（字符串数组，最多 5 条）。
-语言简洁，每段 100–200 字，给出明确的风险提示。"""
+语言简洁，每段 100–200 字；重点说明资金流向、个人持仓风险与明日操作，不推荐候选股。"""
 
 
 def _quote_map(codes: list[str]) -> dict:
     return QuoteService().get_quotes(codes) if codes else {}
+
+
+def _suggestion(row: dict, price: float) -> str:
+    if row.get("available_shares") == 0:
+        return "今日买入，T+1 明日才可卖出，先按计划观察"
+    stop = row.get("stop_loss")
+    take_profit = row.get("take_profit_1")
+    pnl_pct = row.get("pnl_pct") or 0.0
+    if stop and price <= float(stop) * 1.02:
+        return "接近止损，明日优先减仓或离场"
+    if take_profit and price >= float(take_profit):
+        return "到达止盈一，考虑分批止盈并上移止损"
+    if pnl_pct >= 8:
+        return "浮盈较厚，止损上移至成本价保护利润"
+    if pnl_pct <= -5:
+        return "浮亏扩大，检查 MA20 与量能，必要时减仓"
+    return "持有观察，按计划止损"
+
+
+def _personal_operations(session: Session, trade_date: date, holdings: list[dict]) -> dict:
+    rows = list(
+        session.execute(
+            select(HoldingTransaction, Holding)
+            .join(Holding, Holding.id == HoldingTransaction.holding_id)
+            .where(HoldingTransaction.trade_date == trade_date)
+            .order_by(HoldingTransaction.id)
+        ).all()
+    )
+    trades = []
+    realized = 0.0
+    buy_amount = 0.0
+    for transaction, holding in rows:
+        amount = transaction.price * transaction.shares
+        pnl = None
+        if transaction.action == "sell":
+            pnl = (transaction.price - holding.cost_price) * transaction.shares - transaction.fee
+            realized += pnl
+        else:
+            buy_amount += amount
+        trades.append(
+            {
+                "code": holding.code,
+                "name": holding.name,
+                "action": "买入" if transaction.action == "buy" else "卖出",
+                "price": round(transaction.price, 3),
+                "shares": transaction.shares,
+                "amount": round(amount, 2),
+                "fee": round(transaction.fee, 2),
+                "pnl": round(pnl, 2) if pnl is not None else None,
+            }
+        )
+
+    suggestions = [
+        {
+            "code": row["code"],
+            "name": row["name"],
+            "price": row["price"],
+            "pnl_pct": row["pnl_pct"],
+            "suggestion": _suggestion(row, row["price"]),
+        }
+        for row in holdings
+    ]
+    return {
+        "trades": trades,
+        "buy_count": sum(1 for item in trades if item["action"] == "买入"),
+        "sell_count": sum(1 for item in trades if item["action"] == "卖出"),
+        "realized_pnl": round(realized, 2),
+        "buy_amount": round(buy_amount, 2),
+        "suggestions": suggestions,
+    }
 
 
 def build_review_data(session: Session, trade_date: date | None = None) -> dict[str, Any]:
@@ -82,35 +158,14 @@ def build_review_data(session: Session, trade_date: date | None = None) -> dict[
                 "price": round(price, 2),
                 "cost": row["cost"],
                 "shares": row["shares"],
+                "available_shares": row["available_shares"],
                 "pnl": round(pnl, 2),
                 "pnl_pct": round((price / row["cost"] - 1) * 100, 2) if row["cost"] else 0.0,
                 "stop_loss": row["stop_loss"],
+                "take_profit_1": row["take_profit_1"],
+                "suggestion": _suggestion(row, price),
             }
         )
-
-    latest = session.scalar(
-        select(Candidate.trade_date).order_by(Candidate.trade_date.desc()).limit(1)
-    )
-    candidate_rows = []
-    candidate_total = 0
-    if latest is not None:
-        candidate_total = int(
-            session.scalar(
-                select(func.count()).select_from(Candidate).where(Candidate.trade_date == latest)
-            )
-            or 0
-        )
-        for row in session.scalars(
-            select(Candidate).where(Candidate.trade_date == latest).order_by(Candidate.rank).limit(10)
-        ):
-            candidate_rows.append(
-                {
-                    "code": row.code,
-                    "name": row.name,
-                    "score": row.score,
-                    "rank": row.rank,
-                }
-            )
 
     day_start = datetime.combine(trade_date, datetime.min.time())
     alerts = list(
@@ -130,6 +185,9 @@ def build_review_data(session: Session, trade_date: date | None = None) -> dict[
         for event in alerts
     ]
 
+    sectors = get_sector_flow(trade_date)
+    lhb = get_lhb(trade_date)
+
     return {
         "trade_date": trade_date.isoformat(),
         "market": {
@@ -146,8 +204,9 @@ def build_review_data(session: Session, trade_date: date | None = None) -> dict[
             "pnl_pct": round((total_value / total_cost - 1) * 100, 2) if total_cost else 0.0,
             "today_pnl": round(today_pnl, 2),
         },
-        "candidates": candidate_rows,
-        "candidate_total": candidate_total,
+        "sectors": sectors,
+        "lhb": lhb,
+        "operations": _personal_operations(session, trade_date, holding_rows),
         "alerts": alert_rows,
     }
 
@@ -174,18 +233,61 @@ def _summaries(data: dict) -> dict[str, str]:
         f"今日盈亏 {totals['today_pnl']:+,.2f} 元。"
     )
 
-    candidates = data["candidates"]
-    if candidates:
-        top = "、".join(f"{row['name']}（{row['score']:.1f}）" for row in candidates[:3])
-        candidates_summary = f"候选池 {data.get('candidate_total', len(candidates))} 只，评分前三：{top}。"
+    sectors = data["sectors"]
+    if sectors.get("available"):
+        inflow = "、".join(
+            f"{item['name']} {item['net_inflow'] / 1e8:+.2f}亿" for item in sectors["inflow"][:3]
+        )
+        outflow = "、".join(
+            f"{item['name']} {item['net_inflow'] / 1e8:+.2f}亿" for item in sectors["outflow"][:3]
+        )
+        sector_summary = f"资金流入前三：{inflow}；流出前三：{outflow}。"
     else:
-        candidates_summary = "今日无候选。"
+        top = "、".join(
+            f"{item['name']} {item['pct_chg']:+.2f}%" for item in sectors.get("performance_top", [])[:3]
+        )
+        bottom = "、".join(
+            f"{item['name']} {item['pct_chg']:+.2f}%" for item in sectors.get("performance_bottom", [])[:3]
+        )
+        sector_summary = f"资金流数据暂不可用；板块涨幅前三：{top}；跌幅前三：{bottom}。"
+
+    lhb = data["lhb"]
+    if lhb.get("available"):
+        names = "、".join(item["name"] for item in lhb["net_buy"][:3])
+        lhb_summary = f"龙虎榜 {lhb['total']} 只，净买入靠前：{names}。"
+    else:
+        lhb_summary = "龙虎榜数据暂不可用。"
+
+    operations = data["operations"]
+    operation_summary = (
+        f"今日买入 {operations['buy_count']} 笔、卖出 {operations['sell_count']} 笔，"
+        f"已实现盈亏 {operations['realized_pnl']:+,.2f} 元。"
+    )
+
     return {
         "market_summary": market_summary,
         "watch_summary": watch_summary,
         "holding_summary": holding_summary,
-        "candidates_summary": candidates_summary,
+        "sector_summary": sector_summary,
+        "lhb_summary": lhb_summary,
+        "operation_summary": operation_summary,
     }
+
+
+def _ai_narrative_from(result: dict) -> str:
+    parts = [
+        ("大盘", result.get("market_narrative")),
+        ("自选", result.get("watch_narrative")),
+        ("持仓", result.get("holding_narrative")),
+        ("板块资金", result.get("sector_narrative")),
+        ("龙虎榜", result.get("lhb_narrative")),
+        ("个人操作", result.get("operation_narrative")),
+    ]
+    text = "\n\n".join(f"【{label}】{value}" for label, value in parts if value)
+    focus = result.get("tomorrow_focus")
+    if isinstance(focus, list) and focus:
+        text += "\n\n【明日关注】" + "；".join(str(item) for item in focus[:5])
+    return text
 
 
 def generate_review(
@@ -203,6 +305,7 @@ def generate_review(
 
     data = build_review_data(session, trade_date)
     summaries = _summaries(data)
+    data["summaries"] = summaries
     ai_narrative = None
     raw: dict[str, Any] = {"data": data, "summaries": summaries}
 
@@ -217,8 +320,9 @@ def generate_review(
             "holding_totals": data["holding_totals"],
             "watchlist": data["watchlist"][:10],
             "holdings": data["holdings"],
-            "candidates": data["candidates"],
-            "alerts": data["alerts"][:10],
+            "sectors": data["sectors"],
+            "lhb": data["lhb"],
+            "operations": data["operations"],
         }
         try:
             result, log = client.call(
@@ -228,9 +332,9 @@ def generate_review(
                 system=REVIEW_SYSTEM_PROMPT,
                 user=json.dumps(payload, ensure_ascii=False),
                 code=None,
-                max_tokens=1200,
+                max_tokens=1400,
             )
-            ai_narrative = str(result.get("market_narrative") or "").strip()
+            ai_narrative = _ai_narrative_from(result)
             raw["ai"] = result
             raw["usage"] = {
                 "input_tokens": log.input_tokens,
@@ -245,7 +349,7 @@ def generate_review(
     report.market_summary = summaries["market_summary"]
     report.watch_summary = summaries["watch_summary"]
     report.holding_summary = summaries["holding_summary"]
-    report.candidates_summary = summaries["candidates_summary"]
+    report.candidates_summary = None
     report.ai_narrative = ai_narrative
     report.raw = raw
     if existing is None:

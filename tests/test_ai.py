@@ -236,6 +236,13 @@ def test_review_without_ai_and_with_ai(session, monkeypatch) -> None:
         "app.services.review.QuoteService.get_index_quotes", lambda self, codes: {}
     )
     monkeypatch.setattr("app.services.review.QuoteService.get_quotes", lambda self, codes: {})
+    monkeypatch.setattr(
+        "app.services.review.get_sector_flow",
+        lambda day: {"available": False, "performance_top": [], "performance_bottom": []},
+    )
+    monkeypatch.setattr(
+        "app.services.review.get_lhb", lambda day: {"available": False, "total": 0}
+    )
 
     report = generate_review(session, trade_date=TRADE_DATE, use_ai=False)
     assert report.market_summary
@@ -254,7 +261,9 @@ def test_review_without_ai_and_with_ai(session, monkeypatch) -> None:
                                     "market_narrative": "指数震荡，等待方向。",
                                     "watch_narrative": "自选表现平稳。",
                                     "holding_narrative": "持仓浮盈。",
-                                    "candidates_narrative": "候选质量一般。",
+                                    "sector_narrative": "半导体资金流入。",
+                                    "lhb_narrative": "龙虎榜净买入集中在银行。",
+                                    "operation_narrative": "今日无操作。",
                                     "tomorrow_focus": ["关注成交量"],
                                 },
                                 ensure_ascii=False,
@@ -270,5 +279,6 @@ def test_review_without_ai_and_with_ai(session, monkeypatch) -> None:
     report = generate_review(
         session, trade_date=TRADE_DATE, use_ai=True, client=client, force=True
     )
-    assert report.ai_narrative == "指数震荡，等待方向。"
+    assert "指数震荡，等待方向。" in report.ai_narrative
+    assert "半导体资金流入。" in report.ai_narrative
     assert report.raw["usage"]["input_tokens"] == 800

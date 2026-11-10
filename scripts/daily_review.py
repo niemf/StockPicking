@@ -36,7 +36,10 @@ def main() -> int:
         print("市场：", report.market_summary)
         print("自选：", report.watch_summary)
         print("持仓：", report.holding_summary)
-        print("候选：", report.candidates_summary)
+        summaries = (report.raw or {}).get("summaries", {})
+        print("板块：", summaries.get("sector_summary"))
+        print("龙虎榜：", summaries.get("lhb_summary"))
+        print("操作：", summaries.get("operation_summary"))
         if report.ai_narrative:
             print("AI：", report.ai_narrative[:500])
         else:

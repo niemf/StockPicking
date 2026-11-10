@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">REVIEW</p>
     <h1>每日复盘</h1>
-    <p class="subtitle">结构化摘要由本地数据生成，AI 只负责撰写叙述与次日关注点。</p>
+    <p class="subtitle">大盘、板块资金、龙虎榜、自选、持仓与个人操作；AI 只负责撰写叙述与次日关注点。</p>
   </div>
   <div class="page-head-actions">
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
@@ -47,7 +47,7 @@
     </div>
     <p class="report-line">{{ report.market_summary }}</p>
     <p class="report-line">{{ report.holding_summary }}</p>
-    <p class="report-line">{{ report.candidates_summary }}</p>
+    <p class="report-line">{{ (report.raw or {}).get('summaries', {}).get('sector_summary', '') }}</p>
     <a class="link" href="/reports/{{ report.trade_date }}">查看完整复盘 →</a>
   </article>
   {% endfor %}

@@ -15,14 +15,12 @@
   </div>
 </section>
 
-{% if ai_error %}
-<div class="flash flash-error">AI 叙述未生成：{{ ai_error }}</div>
-{% endif %}
+{% if ai_error %}<div class="flash flash-error">AI 叙述未生成：{{ ai_error }}</div>{% endif %}
 
 <div class="dashboard-grid">
   <div class="stack">
     <section class="panel">
-      <div class="panel-head"><div><h2>市场</h2><p>指数与风格</p></div></div>
+      <div class="panel-head"><div><h2>大盘</h2><p>指数与市场风格</p></div></div>
       <p class="report-text">{{ report.market_summary }}</p>
       <div class="index-strip review-indices">
         {% for item in data.get('market', {}).get('indices', []) %}
@@ -36,47 +34,141 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>自选股</h2><p>{{ data.watchlist | length }} 只</p></div></div>
-      <p class="report-text">{{ report.watch_summary }}</p>
+      <div class="panel-head">
+        <div><h2>板块资金</h2><p>{{ data.get('sectors', {}).get('source') or '—' }} · {{ '资金流' if data.get('sectors', {}).get('available') else '涨幅降级' }}</p></div>
+      </div>
+      <p class="report-text">{{ data.get('summaries', {}).get('sector_summary') }}</p>
+      {% set sectors = data.get('sectors', {}) %}
+      {% if sectors.get('available') %}
+      <div class="flow-grid">
+        <div>
+          <h4 class="flow-title up">资金流入</h4>
+          <table class="data-table compact-table">
+            <thead><tr><th>板块</th><th>涨跌</th><th>主力净流入</th></tr></thead>
+            <tbody>
+              {% for row in sectors.inflow %}
+              <tr><td>{{ row.name }}</td><td class="{{ 'up' if row.pct_chg and row.pct_chg > 0 else 'down' }}">{{ '%+.2f' | format(row.pct_chg or 0) }}%</td><td class="up">{{ '%+.2f' | format(row.net_inflow / 100000000) }} 亿</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <h4 class="flow-title down">资金流出</h4>
+          <table class="data-table compact-table">
+            <thead><tr><th>板块</th><th>涨跌</th><th>主力净流入</th></tr></thead>
+            <tbody>
+              {% for row in sectors.outflow %}
+              <tr><td>{{ row.name }}</td><td class="{{ 'up' if row.pct_chg and row.pct_chg > 0 else 'down' }}">{{ '%+.2f' | format(row.pct_chg or 0) }}%</td><td class="down">{{ '%+.2f' | format(row.net_inflow / 100000000) }} 亿</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% else %}
+      <div class="flow-grid">
+        <div>
+          <h4 class="flow-title up">涨幅靠前</h4>
+          {% for row in sectors.get('performance_top', []) %}
+          <div class="flow-row"><span>{{ row.name }}</span><strong class="up">{{ '%+.2f' | format(row.pct_chg) }}%</strong></div>
+          {% endfor %}
+        </div>
+        <div>
+          <h4 class="flow-title down">跌幅靠前</h4>
+          {% for row in sectors.get('performance_bottom', []) %}
+          <div class="flow-row"><span>{{ row.name }}</span><strong class="down">{{ '%+.2f' | format(row.pct_chg) }}%</strong></div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>持仓</h2><p>{{ data.holdings | length }} 只</p></div></div>
-      <p class="report-text">{{ report.holding_summary }}</p>
-      {% if data.holdings %}
+      <div class="panel-head">
+        <div><h2>龙虎榜</h2><p>{{ data.get('lhb', {}).get('total', 0) }} 只 · 净买卖额</p></div>
+      </div>
+      {% if data.get('lhb', {}).get('available') %}
       <div class="table-wrap">
         <table class="data-table">
-          <thead><tr><th>股票</th><th>现价 / 成本</th><th>盈亏</th><th>止损</th></tr></thead>
+          <thead><tr><th>股票</th><th>涨跌</th><th>净买额</th><th>上榜原因</th></tr></thead>
           <tbody>
-            {% for row in data.holdings %}
+            {% for row in data.lhb.net_buy %}
             <tr>
               <td><a class="stock-cell" href="/stock/{{ row.code }}"><strong>{{ row.name }}</strong><small>{{ row.code }}</small></a></td>
-              <td>{{ row.price }} / {{ row.cost }}</td>
-              <td class="{{ 'up' if row.pnl >= 0 else 'down' }}">{{ '%+.2f' | format(row.pnl) }}（{{ '%+.2f' | format(row.pnl_pct) }}%）</td>
-              <td class="down">{{ row.stop_loss or '—' }}</td>
+              <td class="{{ 'up' if row.pct_chg and row.pct_chg > 0 else 'down' }}">{{ '%+.2f' | format(row.pct_chg or 0) }}%</td>
+              <td class="{{ 'up' if row.net_buy >= 0 else 'down' }}">{{ '%+.2f' | format(row.net_buy / 100000000) }} 亿</td>
+              <td><small>{{ row.reason or row.interpretation or '—' }}</small></td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
+      {% else %}
+      <p class="muted empty-note">龙虎榜数据暂不可用。</p>
       {% endif %}
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>候选池</h2><p>{{ data.get('candidate_total', data.candidates | length) }} 只</p></div></div>
-      <p class="report-text">{{ report.candidates_summary }}</p>
-      {% if data.candidates %}
-      <div class="tag-row">
-        {% for row in data.candidates %}
-        <a class="tag" href="/stock/{{ row.code }}">#{{ row.rank }} {{ row.name }} {{ row.score }}</a>
-        {% endfor %}
+      <div class="panel-head">
+        <div><h2>持仓与今日操作</h2><p>{{ data.get('summaries', {}).get('operation_summary') }}</p></div>
       </div>
+      {% set ops = data.get('operations', {}) %}
+      {% if ops.trades %}
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>方向</th><th>股票</th><th>价格</th><th>股数</th><th>金额</th><th>盈亏</th></tr></thead>
+          <tbody>
+            {% for row in ops.trades %}
+            <tr>
+              <td><span class="badge badge-{{ 'warning' if row.action == '买入' else 'success' }}">{{ row.action }}</span></td>
+              <td>{{ row.name }} <small class="muted">{{ row.code }}</small></td>
+              <td>{{ row.price }}</td>
+              <td>{{ row.shares }}</td>
+              <td>{{ row.amount }}</td>
+              <td class="{{ 'up' if row.pnl and row.pnl > 0 else ('down' if row.pnl and row.pnl < 0 else '') }}">{{ '%+.2f' | format(row.pnl) if row.pnl is not none else '—' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="muted empty-note">今日没有买卖记录。</p>
       {% endif %}
+
+      {% if ops.suggestions %}
+      <h4 class="flow-title">明日操作建议</h4>
+      <ul class="reason-list">
+        {% for row in ops.suggestions %}
+        <li><strong>{{ row.name }}（{{ row.code }}）</strong>：{{ row.suggestion }}（现价 {{ row.price }}，浮盈 {{ '%+.2f' | format(row.pnl_pct) }}%）</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><div><h2>自选与持仓</h2><p>{{ data.watchlist | length }} 只自选 · {{ data.holdings | length }} 只持仓</p></div></div>
+      <p class="report-text">{{ report.watch_summary }}</p>
+      <p class="report-text">{{ report.holding_summary }}</p>
     </section>
   </div>
 
   <aside class="stack">
-    {% if report.ai_narrative %}
+    {% if ai %}
+    <section class="panel regime-panel">
+      <div class="panel-head"><div><h2>AI 复盘</h2><p>只基于结构化数据</p></div></div>
+      {% for key, label in [('market_narrative', '大盘'), ('sector_narrative', '板块资金'), ('lhb_narrative', '龙虎榜'), ('holding_narrative', '持仓'), ('operation_narrative', '个人操作'), ('watch_narrative', '自选')] %}
+      {% if ai.get(key) %}
+      <h4 class="flow-title">{{ label }}</h4>
+      <p class="report-text">{{ ai.get(key) }}</p>
+      {% endif %}
+      {% endfor %}
+      {% if ai.get('tomorrow_focus') %}
+      <h4 class="flow-title">明日关注</h4>
+      <ul class="reason-list">
+        {% for item in ai.get('tomorrow_focus') %}<li>{{ item }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </section>
+    {% elif report.ai_narrative %}
     <section class="panel regime-panel">
       <div class="panel-head"><div><h2>AI 复盘</h2><p>基于结构化数据撰写</p></div></div>
       <p class="report-text">{{ report.ai_narrative }}</p>
@@ -86,10 +178,7 @@
     {% if data.market %}
     <section class="panel">
       <div class="panel-head"><div><h2>市场风格</h2><p>规则引擎</p></div></div>
-      <div class="regime-score">
-        <span>综合得分</span>
-        <strong>{{ data.market.score }}</strong>
-      </div>
+      <div class="regime-score"><span>综合得分</span><strong>{{ data.market.score }}</strong></div>
       <div class="advice">{{ data.market.advice }}</div>
     </section>
     {% endif %}

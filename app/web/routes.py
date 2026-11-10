@@ -844,6 +844,7 @@ def report_detail(request: Request, trade_date: str, db: Session = Depends(get_d
             "page_title": f"复盘 {target}",
             "report": report,
             "data": raw.get("data") or {},
+            "ai": raw.get("ai"),
             "ai_error": raw.get("ai_error"),
             "usage": raw.get("usage"),
             "regime": MARKET_REGIME,

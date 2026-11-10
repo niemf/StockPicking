@@ -270,6 +270,24 @@ class AkShareProvider:
 
         return pd.DataFrame()
 
+    # ------------------------------------------------------------------ market flow
+    def get_sector_fund_flow(self, indicator: str = "今日") -> pd.DataFrame:
+        """Industry-level capital flow ranking (Eastmoney)."""
+        ak = _ak()
+        return ak.stock_sector_fund_flow_rank(indicator=indicator, sector_type="行业资金流")
+
+    def get_lhb_detail(self, start: date, end: date) -> pd.DataFrame:
+        """Dragon-Tiger list detail (Eastmoney)."""
+        ak = _ak()
+        return ak.stock_lhb_detail_em(
+            start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d")
+        )
+
+    def get_sector_spot(self) -> pd.DataFrame:
+        """Sina industry-board performance, used when fund-flow data is down."""
+        ak = _ak()
+        return ak.stock_sector_spot(indicator="新浪行业")
+
     # ------------------------------------------------------------------ calendar
     def get_trade_calendar(self, start: date | None = None, end: date | None = None) -> list[date]:
         ak = _ak()
