@@ -1194,6 +1194,37 @@ a.watch-card:hover {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.alerts-table {
+  min-width: 900px;
+}
+
+.alerts-table .alert-condition {
+  display: block;
+  max-width: 320px;
+  color: #4b5568;
+  font-size: 12px;
+}
+
+.alerts-table .num {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.dedup-key {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: #f1f4fa;
+  color: #6b7488;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.empty-note {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+
 /* ------------------------------------------------------------------ detail */
 .stock-head {
   display: flex;

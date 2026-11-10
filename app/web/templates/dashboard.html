@@ -26,7 +26,7 @@
   </article>
   <article class="stat-card">
     <span class="stat-label">今日预警</span>
-    <strong class="stat-value">{{ alerts | length }}</strong>
+    <strong class="stat-value">{{ alert_total }}</strong>
     <span class="stat-sub">{{ alert_counts.success }} 条止盈 · {{ alert_counts.warning }} 条趋势 · {{ alert_counts.info }} 条观察</span>
   </article>
   <article class="stat-card">
@@ -169,6 +169,7 @@
           <h2>今日预警</h2>
           <p>盘中触发的关键信号</p>
         </div>
+        <a class="link" href="/alerts">全部预警 →</a>
       </div>
       <div class="alert-list">
         {% for alert in alerts %}
@@ -181,6 +182,9 @@
           <span class="badge badge-{{ alert.level }}">{{ alert.status }}</span>
         </div>
         {% endfor %}
+        {% if not alerts %}
+        <p class="muted empty-note">暂无预警事件。规则会在盘中轮询时自动生成并检查。</p>
+        {% endif %}
       </div>
     </section>
 

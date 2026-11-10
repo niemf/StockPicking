@@ -283,7 +283,10 @@ class AlertRule(Base):
     rearm_threshold: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
-    __table_args__ = (Index("ix_alert_rule_target", "target_type", "target_id"),)
+    __table_args__ = (
+        Index("ix_alert_rule_target", "target_type", "target_id"),
+        UniqueConstraint("target_type", "target_id", "rule_type", name="uq_alert_rule_target_type"),
+    )
 
 
 class AlertEvent(Base):
@@ -369,6 +372,17 @@ class MarketRegime(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class TradeCalendar(Base):
+    """交易日历缓存；盘前同步一次，盘中判断只查本地。"""
+
+    __tablename__ = "trade_calendar"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    is_open: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str | None] = mapped_column(String(32), default=None)  # holiday / weekend
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 class JobRun(Base):
     """定时任务执行记录，用于单实例锁与故障排查。"""
 
@@ -406,5 +420,6 @@ __all__ = [
     "ReviewReport",
     "Stock",
     "TradePlan",
+    "TradeCalendar",
     "Watchlist",
 ]

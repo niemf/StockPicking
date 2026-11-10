@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">ALERTS</p>
+    <h1>预警</h1>
+    <p class="subtitle">
+      规则由持仓止损/止盈与自选建仓区间自动生成，经连续采样确认后推送飞书。
+      当前共 {{ rule_count }} 条规则 · {{ count }} 条事件。
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <span class="regime-pill {{ regime.regime }}">{{ status.session_label }}</span>
+    <span class="badge badge-source">{{ status.date }}</span>
+  </div>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">监控状态</span>
+    <strong class="stat-value {{ 'up' if monitor.ok else ('down' if monitor.ok is false else 'flat') }}">
+      {{ '正常' if monitor.ok else ('异常' if monitor.ok is false else '未启动') }}
+    </strong>
+    <span class="stat-sub">
+      {% if monitor.at %}最近轮询 {{ monitor.at | replace('T', ' ') }}{% else %}设置 MONITOR_ENABLED=true 开启盘中轮询{% endif %}
+    </span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">今日时段</span>
+    <strong class="stat-value">{{ status.session_label }}</strong>
+    <span class="stat-sub">{{ '交易日' if status.is_trading_day else '非交易日' }} · 日历 {{ status.calendar_rows }} 天</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">风险类事件</span>
+    <strong class="stat-value up">{{ alert_counts.warning }}</strong>
+    <span class="stat-sub">止损 / 移动止盈 / 跌停</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">机会类事件</span>
+    <strong class="stat-value down">{{ alert_counts.success }}</strong>
+    <span class="stat-sub">止盈 {{ alert_counts.success }} 条 · 建仓/异动 {{ alert_counts.info }} 条</span>
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>触发历史</h2>
+      <p>按触发时间倒序，最多显示 100 条</p>
+    </div>
+    <span class="filter-hint">
+      最近轮询：
+      {% if monitor.at %}{{ monitor.at | replace('T', ' ') }}（{{ monitor.reason }}）{% else %}尚未启动{% endif %}
+    </span>
+  </div>
+
+  {% if items %}
+  <div class="table-wrap">
+    <table class="data-table alerts-table">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>股票</th>
+          <th>规则</th>
+          <th>触发条件</th>
+          <th>价格</th>
+          <th>通知</th>
+          <th>去重键</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><span>{{ item.time }}</span><small>{{ item.date }}</small></td>
+          <td>
+            <a class="stock-cell" href="/stock/{{ item.code }}">
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.code }}</small>
+            </a>
+          </td>
+          <td><span class="badge badge-{{ item.level }}">{{ item.rule }}</span></td>
+          <td><span class="alert-condition">{{ item.message }}</span></td>
+          <td class="num">{{ item.price | price }}</td>
+          <td>{{ item.status }}</td>
+          <td><code class="dedup-key">{{ item.dedup_key }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <strong>暂无预警事件</strong>
+    <p>
+      {% if rule_count %}
+      已生成 {{ rule_count }} 条规则，价格触发并通过连续采样后才会入库。
+      {% else %}
+      添加自选或持仓后，规则会在首次轮询时自动生成。
+      {% endif %}
+      可用 <code>POST /api/monitor/tick?force=true&amp;dry_run=true</code> 立即试跑一次。
+    </p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

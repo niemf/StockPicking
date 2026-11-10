@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     quote_cache_seconds: int = 10
     poll_interval_seconds: int = 120
 
+    # Monitoring / alerts
+    monitor_enabled: bool = False
+    monitor_timezone: str = "Asia/Shanghai"
+    alert_confirm_samples: int = 2
+    alert_stop_confirm_samples: int = 1
+    alert_cooldown_seconds: int = 1800
+    alert_rearm_pct: float = 0.5
+    alert_trailing_drawdown_pct: float = 8.0
+    alert_price_change_pct: float = 5.0
+
     # AI
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"

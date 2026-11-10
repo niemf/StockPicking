@@ -7,20 +7,25 @@ live prices are overlaid from Tencent/Sina. Demo data is now only a seed source
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.base import check_database, get_db
-from app.db.models import Stock
-from app.demo_data import ALERTS, INDICES, MARKET_REGIME, get_stock_detail, make_kline
+from app.db.models import AlertEvent, AlertRule, Stock
+from app.demo_data import INDICES, MARKET_REGIME, get_stock_detail, make_kline
 from app.providers.base import normalize_code
+from app.services import alerts as alert_service
+from app.services import monitor as monitor_service
+from app.services.calendar import session_status, sync_calendar
+from app.services.notifier import condition_text
 from app.services.portfolio import (
     PortfolioError,
     add_holding,
@@ -82,6 +87,46 @@ def _trend_class(value: float | None) -> str:
 
 def _rating_class(rating: str) -> str:
     return {"看多": "buy", "中性": "neutral", "观察": "watch"}.get(rating, "neutral")
+
+
+ALERT_LEVELS = {"red": "warning", "green": "success", "blue": "info", "grey": "info"}
+ALERT_STATUS = {
+    "sent": "已发送",
+    "failed": "发送失败",
+    "pending": "待发送",
+    "suppressed": "已抑制",
+}
+
+
+def _alert_items(db: Session, limit: int = 20) -> list[dict]:
+    items: list[dict] = []
+    for event in alert_service.recent_events(db, limit=limit):
+        snapshot = event.condition_snapshot or {}
+        meta = alert_service.rule_meta(snapshot.get("rule_type", ""))
+        items.append(
+            {
+                "id": event.id,
+                "time": event.trigger_ts.strftime("%H:%M:%S"),
+                "date": event.trigger_ts.strftime("%Y-%m-%d"),
+                "name": snapshot.get("name") or event.code,
+                "code": event.code,
+                "price": event.trigger_price,
+                "rule": meta["label"],
+                "message": condition_text(event),
+                "status": ALERT_STATUS.get(event.status, event.status),
+                "level": ALERT_LEVELS.get(meta["color"], "info"),
+                "dedup_key": event.dedup_key,
+            }
+        )
+    return items
+
+
+def _alert_counts(items: list[dict]) -> dict[str, int]:
+    return {
+        "success": sum(1 for item in items if item["level"] == "success"),
+        "warning": sum(1 for item in items if item["level"] == "warning"),
+        "info": sum(1 for item in items if item["level"] == "info"),
+    }
 
 
 def _snapshot(quote, fallback_price: float, fallback_pct: float) -> dict:
@@ -279,11 +324,17 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     ]
     pnl_bars = [{"name": item["name"], "value": round(item["pnl"], 2)} for item in holdings]
     ai_count = sum(1 for item in watchlist if item["source"] == "AI 候选")
-    alert_counts = {
-        "success": sum(1 for alert in ALERTS if alert["level"] == "success"),
-        "warning": sum(1 for alert in ALERTS if alert["level"] == "warning"),
-        "info": sum(1 for alert in ALERTS if alert["level"] == "info"),
-    }
+    alert_items = _alert_items(db, limit=10)
+    alert_counts = _alert_counts(alert_items)
+    today_start = datetime.combine(date.today(), time.min)
+    alert_total = (
+        db.scalar(
+            select(func.count())
+            .select_from(AlertEvent)
+            .where(AlertEvent.trigger_ts >= today_start)
+        )
+        or 0
+    )
 
     return render(
         request,
@@ -299,8 +350,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "rule_count": len(watchlist) - ai_count,
             "holdings": holdings,
             "totals": totals,
-            "alerts": ALERTS,
+            "alerts": alert_items,
             "alert_counts": alert_counts,
+            "alert_total": alert_total,
             "allocation": allocation,
             "pnl_bars": pnl_bars,
         },
@@ -564,20 +616,83 @@ def reports(request: Request):
     )
 
 
+@router.get("/alerts")
+def alerts_page(request: Request, db: Session = Depends(get_db)):
+    items = _alert_items(db, limit=100)
+    rule_count = db.scalar(select(func.count()).select_from(AlertRule)) or 0
+    status = session_status(db)
+    return render(
+        request,
+        "alerts.html",
+        {
+            "page": "alerts",
+            "page_title": "预警",
+            "items": items,
+            "count": len(items),
+            "rule_count": rule_count,
+            "alert_counts": _alert_counts(items),
+            "status": status,
+            "monitor": monitor_service.monitor_status(),
+            "regime": MARKET_REGIME,
+        },
+    )
+
+
 # ------------------------------------------------------------------ api
 @router.get("/api/health")
-def health():
+def health(db: Session = Depends(get_db)):
     database = check_database()
+    calendar = session_status(db)
+    monitor = monitor_service.monitor_status()
+    healthy = database["ok"] and (monitor["ok"] is not False)
     return {
-        "status": "ok" if database["ok"] else "degraded",
+        "status": "ok" if healthy else "degraded",
         "app": settings.app_name,
-        "stage": "database",
+        "stage": "monitor",
         "database": {
             "ok": database["ok"],
             "dialect": database["dialect"],
             "path": database["path"],
         },
+        "calendar": calendar,
+        "monitor": monitor,
     }
+
+
+@router.get("/api/calendar")
+def api_calendar(db: Session = Depends(get_db)):
+    return session_status(db)
+
+
+@router.post("/api/calendar/sync")
+def api_calendar_sync(db: Session = Depends(get_db)):
+    from app.providers.akshare_provider import AkShareProvider
+
+    inserted = sync_calendar(db, provider=AkShareProvider())
+    return {"inserted": inserted, **session_status(db)}
+
+
+@router.get("/api/alerts")
+def api_alerts(limit: int = 50, db: Session = Depends(get_db)):
+    items = _alert_items(db, limit=max(1, min(limit, 500)))
+    return {"count": len(items), "items": items}
+
+
+@router.post("/api/monitor/tick")
+def api_monitor_tick(
+    force: bool = True,
+    dry_run: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Manual tick for debugging. ``force`` ignores the trading-session window."""
+    return monitor_service.run_once(db, force=force, dry_run=dry_run)
+
+
+@router.post("/api/monitor/retry")
+def api_monitor_retry(db: Session = Depends(get_db)):
+    from app.services.notifier import Notifier
+
+    return Notifier().notify_pending(db)
 
 
 @router.get("/api/quotes")

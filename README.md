@@ -46,7 +46,7 @@ TradeAI/
 │   ├── demo_data.py            # 演示数据（现仅用于播种与 AI 文案）
 │   ├── db/
 │   │   ├── base.py             # 引擎 / 会话 / 建表 / 健康检查
-│   │   ├── models.py           # 16 张表的 SQLAlchemy 模型
+│   │   ├── models.py           # 17 张表的 SQLAlchemy 模型
 │   │   └── seed.py             # 演示数据播种（幂等）
 │   ├── providers/              # 行情数据源
 │   │   ├── base.py             # Quote / Protocol
@@ -55,13 +55,18 @@ TradeAI/
 │   │   └── akshare_provider.py # AkShare 日线/财务/公告/日历
 │   ├── services/
 │   │   ├── quotes.py           # 行情服务（多源降级 + 缓存）
-│   │   └── portfolio.py        # 自选 / 持仓 / 交易流水业务逻辑
+│   │   ├── portfolio.py        # 自选 / 持仓 / 交易流水业务逻辑
+│   │   ├── calendar.py         # 交易日历缓存与盘中时段判断
+│   │   ├── alerts.py           # 规则生成 + 预警状态机
+│   │   ├── notifier.py         # 飞书卡片 + 邮件兜底 + 发送日志
+│   │   └── monitor.py          # 盘中轮询编排
 │   └── web/
 │       ├── routes.py           # 页面路由
 │       ├── templates/          # Jinja2 模板
 │       └── static/             # CSS / JS
 ├── scripts/
 │   ├── init_db.py              # 建表 / 播种 / 重置数据库
+│   ├── monitor_once.py         # 手动试跑一次轮询（--dry-run / --send）
 │   ├── verify_quotes.py        # 腾讯/新浪实时行情验证
 │   ├── verify_akshare.py       # AkShare 日线/财务/公告验证
 │   ├── verify_feishu.py        # 飞书通知验证
@@ -72,6 +77,8 @@ TradeAI/
 │   ├── test_providers.py       # 行情解析单元测试
 │   ├── test_db.py              # 数据模型 / 约束 / 播种测试
 │   ├── test_portfolio.py       # 自选 / 持仓 / 成本与盈亏测试
+│   ├── test_calendar.py        # 交易日历与盘中时段测试
+│   ├── test_alerts.py          # 规则生成 / 状态机 / 通知 / 轮询测试
 │   └── test_web.py             # 表单增删改 HTTP 流程测试
 ├── docs/
 │   └── 项目大纲.md              # 技术选型、页面地图、验证结果
@@ -140,13 +147,43 @@ SQLite（WAL）+ SQLAlchemy ORM，文件位于 `data/tradeai.db`（已 gitignore
 - `/holdings`：录入成本、股数、止损、止盈；表格下方可修改止损价或删除持仓。
 - 校验规则：仅主板代码、股数 100 的整数倍、止损必须低于成本价、止盈必须高于成本价。
 
+## 监控与预警
+
+默认关闭，避免在规则未确认时误发通知。开启方式（`.env`）：
+
+```ini
+MONITOR_ENABLED=true
+POLL_INTERVAL_SECONDS=120
+FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
+```
+
+规则自动生成，无需手工配置：
+
+| 来源 | 规则 | 首次确认 |
+|---|---|---|
+| 持仓 | 止损（`current_stop`/计划止损）、移动止盈、止盈一/二 | 止损 1 次，其余 2 次 |
+| 自选 | 进入建仓区间、当日涨跌幅超过 5% | 2 次 |
+
+- 盘中 09:30–11:30、13:00–15:00 每 120 秒轮询，集合竞价只记录不告警。
+- 冷却期 30 分钟；价格反向恢复超过 0.5% 才重新武装；同一触发带唯一去重键，不会重复入库。
+- 通知先走飞书卡片，失败重试 3 次（指数退避），再尝试 SMTP 邮件；每次请求与响应写入 `notification_log`。
+- 页面：`/alerts` 查看规则数量、触发历史与通知状态；`/api/health` 返回交易日历时段与最近轮询结果。
+
+手动试跑（不发送）：
+
+```powershell
+& '.venv\python.exe' scripts\monitor_once.py --sync-calendar --dry-run
+```
+
+真实推送把 `--dry-run` 换成 `--send`。也可以调用 `POST /api/monitor/tick?force=true&dry_run=true`。
+
 ## 测试
 
 ```powershell
 & '.venv\python.exe' -m pytest
 ```
 
-当前 31 个测试全部通过，覆盖行情解析、数据库约束、自选/持仓业务逻辑与表单 HTTP 流程。
+当前 58 个测试全部通过，覆盖行情解析、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、表单 HTTP 流程。
 
 ## 数据源验证
 
@@ -171,8 +208,8 @@ SQLite（WAL）+ SQLAlchemy ORM，文件位于 `data/tradeai.db`（已 gitignore
 
 1. ✅ 数据库表与 SQLAlchemy 模型
 2. ✅ 自选股 / 持仓 CRUD（页面表单 + 服务层校验）
-3. 交易日历 + 盘中轮询 + 预警状态机
-4. 飞书 / 邮件通知
+3. ✅ 交易日历 + 盘中轮询 + 预警状态机
+4. ✅ 飞书 / 邮件通知
 5. 技术指标 + 全主板股票发现
 6. DeepSeek 交易计划与每日复盘
 7. Linux 部署与 7×24 运行

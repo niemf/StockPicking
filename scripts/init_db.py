@@ -39,6 +39,7 @@ TABLES = [
     "ai_call_log",
     "review_report",
     "market_regime",
+    "trade_calendar",
     "job_run",
 ]
 
