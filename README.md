@@ -54,12 +54,22 @@ TradeAI/
 │   │   ├── sina.py             # 新浪实时行情
 │   │   └── akshare_provider.py # AkShare 日线/财务/公告/日历
 │   ├── services/
-│   │   ├── quotes.py           # 行情服务（多源降级 + 缓存）
+│   │   ├── quotes.py           # 行情服务（多源降级 + 批量抓取 + 缓存）
 │   │   ├── portfolio.py        # 自选 / 持仓 / 交易流水业务逻辑
 │   │   ├── calendar.py         # 交易日历缓存与盘中时段判断
 │   │   ├── alerts.py           # 规则生成 + 预警状态机
 │   │   ├── notifier.py         # 飞书卡片 + 邮件兜底 + 发送日志
-│   │   └── monitor.py          # 盘中轮询编排
+│   │   ├── monitor.py          # 盘中轮询编排
+│   │   ├── universe.py         # 股票池 / 上市日期 / 次新判断
+│   │   ├── bars.py             # 日线回补与增量更新
+│   │   └── discovery.py        # 全市场发现编排与候选落库
+│   ├── analysis/
+│   │   ├── context.py          # 单股上下文 + 惰性指标缓存
+│   │   ├── features.py         # 指标构建器（可注册）
+│   │   ├── factors.py          # 硬性过滤器 + 评分因子（可注册）
+│   │   ├── pipeline.py         # 分层漏斗 + 综合评分
+│   │   └── profiles/
+│   │       └── default.yaml    # 阈值与权重（策略配置）
 │   └── web/
 │       ├── routes.py           # 页面路由
 │       ├── templates/          # Jinja2 模板
@@ -67,6 +77,10 @@ TradeAI/
 ├── scripts/
 │   ├── init_db.py              # 建表 / 播种 / 重置数据库
 │   ├── monitor_once.py         # 手动试跑一次轮询（--dry-run / --send）
+│   ├── sync_universe.py        # 同步全主板股票列表与上市日期
+│   ├── backfill_bars.py        # 日线回补 / 增量更新
+│   ├── discover.py             # 全市场技术面发现
+│   ├── daily_update.py         # 盘后：增量日线 + 发现（可挂计划任务）
 │   ├── verify_quotes.py        # 腾讯/新浪实时行情验证
 │   ├── verify_akshare.py       # AkShare 日线/财务/公告验证
 │   ├── verify_feishu.py        # 飞书通知验证
@@ -74,14 +88,17 @@ TradeAI/
 │   ├── run.ps1                 # 启动开发服务器
 │   └── verify_all.ps1          # 一键跑全部数据源验证
 ├── tests/
-│   ├── test_providers.py       # 行情解析单元测试
+│   ├── test_providers.py       # 行情解析 + 批量抓取 + 降级测试
 │   ├── test_db.py              # 数据模型 / 约束 / 播种测试
 │   ├── test_portfolio.py       # 自选 / 持仓 / 成本与盈亏测试
 │   ├── test_calendar.py        # 交易日历与盘中时段测试
 │   ├── test_alerts.py          # 规则生成 / 状态机 / 通知 / 轮询测试
+│   ├── test_analysis.py        # 指标 / 因子 / 漏斗测试
+│   ├── test_discovery.py       # 发现编排 / 日线存储 / 幂等测试
 │   └── test_web.py             # 表单增删改 HTTP 流程测试
 ├── docs/
-│   └── 项目大纲.md              # 技术选型、页面地图、验证结果
+│   ├── 项目大纲.md              # 技术选型、页面地图、验证结果
+│   └── 策略选股设计.md          # 前端策略选股的预留设计
 ├── .env.example
 ├── requirements.txt
 ├── pyproject.toml
@@ -177,13 +194,75 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 真实推送把 `--dry-run` 换成 `--send`。也可以调用 `POST /api/monitor/tick?force=true&dry_run=true`。
 
+## 全市场发现
+
+### 数据准备（首次一次）
+
+```powershell
+# 1. 同步主板股票列表（含上市日期、ST 标记）
+& '.venv\python.exe' scripts\sync_universe.py
+
+# 2. 回补日线（320 天，8 线程；全市场约 5–10 分钟）
+& '.venv\python.exe' scripts\backfill_bars.py
+```
+
+日常增量（建议每个交易日 15:05 跑一次）：
+
+```powershell
+& '.venv\python.exe' scripts\backfill_bars.py --incremental
+```
+
+### 运行发现
+
+```powershell
+# 试点 300 只，不写库
+& '.venv\python.exe' scripts\discover.py --limit 300 --no-persist
+
+# 全市场，结果写入 candidate 表
+& '.venv\python.exe' scripts\discover.py
+```
+
+页面上也可以点 `/candidates` 的"运行全市场发现"，或调用 `POST /api/discovery/run`。
+
+盘后一键执行（建议 15:35 挂 Windows 任务计划）：
+
+```powershell
+& '.venv\python.exe' scripts\daily_update.py
+```
+
+### 分层漏斗
+
+| 阶段 | 内容 | 是否需要日线 |
+|---|---|---|
+| 1 | 主板、非 ST、上市 ≥ 60 个交易日、有有效行情 | 否 |
+| 2 | 股价、成交额、换手率 | 否 |
+| 3 | MA20 拐头向上、价格在 MA20 附近/上方、涨停状态 | 是 |
+| 4 | 量比 1.2–3.0、接近/突破 20 日新高 | 是 |
+| 5 | RSI12、MACD 多头、ATR 区间、20 日涨幅/回撤、低开 | 是 |
+| 6 | 趋势 / 量价 / 动量 / 相对强度 / 波动质量加权评分，取前 30 | 复用 |
+
+早期阶段淘汰的股票不会加载日线。实测：300 只试点约 2 秒；全市场在日线已缓存时约 10–20 秒。
+
+### 策略配置
+
+所有阈值和权重在 `app/analysis/profiles/default.yaml`：
+
+- `enabled: false` 可直接关闭某个硬条件；
+- 新增指标：在 `features.py` 加一个 `@feature_builder`；
+- 新增因子：在 `factors.py` 加一个 `@hard_filter` 或 `@scorer`，再写进配置；
+- 主流程、页面、数据库都不需要改。
+
+> 后续可做成前端的"策略选股"页面：每个因子一个勾选项/滑块，选完生成一份 profile，后端用同一套 pipeline 执行。当前架构已经把策略与执行解耦，届时只需新增配置存储和表单。详细设计见 `docs/策略选股设计.md`。
+
+> 已知限制：深市股票带行业字段，沪市交易所列表不含行业，因此部分沪市股票行业显示为“—”。后续可用东方财富行业板块接口批量补齐。
+
 ## 测试
 
 ```powershell
 & '.venv\python.exe' -m pytest
 ```
 
-当前 58 个测试全部通过，覆盖行情解析、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、表单 HTTP 流程。
+当前 76 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排与日线存储。
 
 ## 数据源验证
 
@@ -210,7 +289,7 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 2. ✅ 自选股 / 持仓 CRUD（页面表单 + 服务层校验）
 3. ✅ 交易日历 + 盘中轮询 + 预警状态机
 4. ✅ 飞书 / 邮件通知
-5. 技术指标 + 全主板股票发现
+5. ✅ 技术指标 + 全主板股票发现
 6. DeepSeek 交易计划与每日复盘
 7. Linux 部署与 7×24 运行
 

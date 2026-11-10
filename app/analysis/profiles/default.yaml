@@ -1,0 +1,88 @@
+# 全市场发现默认策略。改这里即可调阈值，不需要改代码。
+# enabled: false 可关闭某个硬性条件或评分因子。
+
+universe:
+  min_list_days: 60        # 上市满 60 个交易日（次新剔除）
+  exclude_st: true
+
+filters:
+  price_range:
+    enabled: true
+    min_price: 2.0
+    max_price: 1000.0
+
+  liquidity:
+    enabled: true
+    min_amount: 100000000  # 成交额 >= 1 亿
+    min_turnover: 1.0      # 换手率 1% ~ 15%
+    max_turnover: 15.0
+
+  limit_state:
+    enabled: true
+
+  limit_extreme:
+    enabled: true
+    max_limit_up_streak: 2
+    max_gap_down_pct: -5.0
+
+  ma20_trend:
+    enabled: true
+    mode: turn_up          # turn_up: 由降转升；rising: 持续向上
+    require_price_above: true
+    price_above_tolerance: 0.97
+
+  ma_alignment:
+    enabled: false         # 严格多头排列，按需打开
+    strict: true
+
+  volume_ratio:
+    enabled: true
+    min: 1.2               # 温和放量
+    max: 3.0               # 不追天量
+
+  breakout_20d:
+    enabled: true
+    min_ratio: 0.97        # 收盘价 >= 20 日最高的 97%
+
+  rsi12:
+    enabled: true
+    min: 45.0
+    max: 70.0
+
+  macd_positive:
+    enabled: true
+    require_above_zero: false
+
+  atr_pct:
+    enabled: true
+    min: 1.5
+    max: 7.0
+
+  max_gain_20d:
+    enabled: true
+    max: 30.0
+
+  max_drawdown_20d:
+    enabled: true
+    max: 15.0
+
+  gap_down:
+    enabled: true
+    max_pct: -5.0
+
+scoring:
+  trend:
+    weight: 30
+  volume_price:
+    weight: 25
+    ideal_volume_ratio: 1.8
+  momentum:
+    weight: 20
+  relative_strength:
+    weight: 15
+  volatility:
+    weight: 10
+    ideal_atr_pct: 3.0
+
+output:
+  top_n: 30

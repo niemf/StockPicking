@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from app.providers.base import (
+    Quote,
     exchange_for_code,
     is_main_board,
     normalize_code,
@@ -12,6 +15,7 @@ from app.providers.base import (
 )
 from app.providers.sina import parse_sina_quotes
 from app.providers.tencent import parse_tencent_quotes
+from app.services.quotes import QuoteService
 
 TENCENT_SAMPLE = (
     'v_sh600000="1~浦发银行~600000~10.16~10.10~10.06~292151~157099~135013~10.15~601~'
@@ -84,3 +88,76 @@ def test_parse_sina_quotes() -> None:
     assert quote.volume == pytest.approx(29216400)
     assert quote.source == "sina"
     assert quote.ts is not None
+
+
+# ------------------------------------------------------------------ batching
+def _fake_quote(code: str) -> Quote:
+    return Quote(
+        code=code,
+        name=code,
+        price=10.0,
+        pre_close=10.0,
+        open=10.0,
+        high=10.0,
+        low=10.0,
+        volume=1.0,
+        amount=10.0,
+        pct_chg=0.0,
+        change=0.0,
+        ts=datetime(2026, 11, 10, 10, 0),
+        source="fake",
+    )
+
+
+class RecordingProvider:
+    name = "recording"
+
+    def __init__(self) -> None:
+        self.batches: list[list[str]] = []
+
+    def get_quotes(self, codes: list[str]) -> dict[str, Quote]:
+        self.batches.append(list(codes))
+        return {code: _fake_quote(code) for code in codes}
+
+
+def test_quote_service_splits_large_requests() -> None:
+    provider = RecordingProvider()
+    service = QuoteService(providers=[provider], cache_seconds=0, batch_size=2, workers=2)
+
+    quotes = service.get_quotes(["600000", "600001", "600002", "600003", "600004"])
+
+    assert len(quotes) == 5
+    assert len(provider.batches) == 3
+    assert all(len(batch) <= 2 for batch in provider.batches)
+    assert sorted(code for batch in provider.batches for code in batch) == [
+        "600000",
+        "600001",
+        "600002",
+        "600003",
+        "600004",
+    ]
+
+
+def test_quote_service_falls_back_when_primary_fails() -> None:
+    class BrokenProvider:
+        name = "broken"
+
+        def get_quotes(self, codes):
+            raise RuntimeError("primary down")
+
+    fallback = RecordingProvider()
+    service = QuoteService(providers=[BrokenProvider(), fallback], cache_seconds=0, batch_size=2)
+
+    quotes = service.get_quotes(["600000", "600001", "600002"])
+    assert set(quotes) == {"600000", "600001", "600002"}
+    assert len(fallback.batches) == 2
+
+
+def test_quote_service_cache_avoids_second_request() -> None:
+    provider = RecordingProvider()
+    service = QuoteService(providers=[provider], cache_seconds=60, batch_size=10)
+
+    service.get_quotes(["600000"])
+    service.get_quotes(["600000"])
+
+    assert len(provider.batches) == 1

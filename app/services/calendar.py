@@ -119,7 +119,7 @@ def sync_calendar(
     hiccup. Rows are upserted, so repeated syncs are cheap and idempotent.
     """
     today = now_local().date()
-    start = start or (today - timedelta(days=7))
+    start = start or (today - timedelta(days=120))
     end = end or (today + timedelta(days=45))
 
     dates: list[date] = []

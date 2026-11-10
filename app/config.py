@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     quote_timeout_seconds: float = 8.0
     quote_cache_seconds: int = 10
     poll_interval_seconds: int = 120
+    quote_batch_size: int = 400
+    quote_workers: int = 6
+
+    # Daily bars / discovery
+    bar_backfill_days: int = 320
+    bar_incremental_days: int = 12
+    bar_fetch_workers: int = 8
+    discovery_top_n: int = 30
 
     # Monitoring / alerts
     monitor_enabled: bool = False

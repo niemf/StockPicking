@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">DISCOVERY</p>
+    <h1>候选池</h1>
+    <p class="subtitle">
+      全主板分层筛选：基础池 → 流动性 → 趋势 → 量价 → 动量与风险 → 综合评分。
+      {% if trade_date %}最近一次：{{ trade_date }}{% else %}还没有运行过全市场发现{% endif %}
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+    <form method="post" action="/candidates/run"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='扫描中…';">
+      <button class="btn btn-primary" type="submit">运行全市场发现</button>
+    </form>
+  </div>
+</section>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+
+{% if stats %}
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">股票池</span>
+    <strong class="stat-value">{{ stats.total_input }}</strong>
+    <span class="stat-sub">行情覆盖 {{ stats.quotes }} 只</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">通过全部硬条件</span>
+    <strong class="stat-value">{{ stats.survivors }}</strong>
+    <span class="stat-sub">加载日线 {{ stats.bars_loaded }} 只</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">最终候选</span>
+    <strong class="stat-value">{{ stats.candidates }}</strong>
+    <span class="stat-sub">按综合评分取前 {{ stats.candidates }} 名</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">总耗时</span>
+    <strong class="stat-value">{{ stats.total_sec }} s</strong>
+    <span class="stat-sub">行情 {{ stats.quote_sec }}s · 日线 {{ stats.bars_load_sec | default('—') }}s · 计算 {{ stats.compute_sec | default('—') }}s</span>
+  </article>
+</section>
+
+<section class="panel funnel-panel">
+  <div class="panel-head">
+    <div>
+      <h2>筛选漏斗</h2>
+      <p>每一层只处理上一层留下的股票，早期淘汰不加载日线</p>
+    </div>
+    {% if job %}<span class="filter-hint">任务 #{{ job.id }} · {{ job.status }}</span>{% endif %}
+  </div>
+  <div class="funnel">
+    {% for stage in stages %}
+    <div class="funnel-step">
+      <span class="funnel-index">{{ stage.stage }}</span>
+      <strong>{{ stage.name }}</strong>
+      <span class="funnel-count">{{ stage.input }} → {{ stage.passed }}</span>
+      <span class="funnel-time">{{ stage.elapsed_ms }} ms</span>
+      {% if stage.rejections %}
+      <div class="funnel-reject">
+        {% for reason, count in stage.rejections.items() %}
+        <span>{{ reason }} {{ count }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% if not loop.last %}<span class="funnel-arrow">→</span>{% endif %}
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if items %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>今日候选</h2>
+      <p>评分越高代表趋势、量价与风险结构越均衡</p>
+    </div>
+    <span class="filter-hint">行情为实时快照，评分基于收盘/最近一根日线</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table candidates-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>股票</th>
+          <th>现价 / 涨跌</th>
+          <th>评分</th>
+          <th>趋势</th>
+          <th>量价</th>
+          <th>动量</th>
+          <th>相对强度</th>
+          <th>波动</th>
+          <th>关键指标</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td><span class="rank-badge">{{ item.rank }}</span></td>
+          <td>
+            <a class="stock-cell" href="/stock/{{ item.code }}">
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.code }} · {{ item.industry }}</small>
+            </a>
+          </td>
+          <td>
+            <span class="{{ item.trend }}">{{ item.price | price }}</span>
+            <small class="{{ item.trend }}">{{ item.pct_chg | pct }}</small>
+          </td>
+          <td><span class="score-badge">{{ '%.1f' | format(item.score) }}</span></td>
+          {% for key in ['trend', 'volume_price', 'momentum', 'relative_strength', 'volatility'] %}
+          <td class="score-cell">
+            {% set value = item.breakdown.get(key, 0) %}
+            <div class="mini-bar"><span style="width: {{ value }}%"></span></div>
+            <small>{{ '%.0f' | format(value) }}</small>
+          </td>
+          {% endfor %}
+          <td>
+            <small>
+              MA20 {{ item.snapshot.ma20 | num2 }} · 量比 {{ item.snapshot.volume_ratio | num2 }}<br>
+              RSI12 {{ item.snapshot.rsi12 | num2 }} · ATR {{ item.snapshot.atr_pct | num2 }}%
+            </small>
+          </td>
+          <td><a class="btn btn-ghost btn-xs" href="/stock/{{ item.code }}">分析 →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="empty-state">
+  <strong>候选池为空</strong>
+  {% if stats %}
+  <p>本次 {{ stats.total_input }} 只股票没有同时满足全部硬条件。可以放宽策略阈值，或查看上方的淘汰原因。</p>
+  {% else %}
+  <p>先运行全市场发现。首次使用需要先回补日线：<code>python scripts/backfill_bars.py</code></p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

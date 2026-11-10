@@ -7,9 +7,10 @@ financial reports and announcement metadata are fetched through AkShare.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pandas as pd
+from loguru import logger
 
 from app.providers.base import board_label, is_main_board, normalize_code
 
@@ -42,6 +43,17 @@ def _pick_column(df: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
     return None
 
 
+def _as_date(value) -> date | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    parsed = pd.to_datetime(value, errors="coerce")
+    return None if pd.isna(parsed) else parsed.date()
+
+
 def _board_label(code: str) -> str:
     return board_label(code)
 
@@ -52,6 +64,73 @@ class AkShareProvider:
     name = "akshare"
 
     # ------------------------------------------------------------------ stock list
+    def get_listed_stocks(self) -> list[dict]:
+        """Return main-board stocks with listing date and industry.
+
+        Two exchange lists are enough for the universe metadata; unlike the
+        generic code-name endpoint they include ``上市日期``, which the sub-new
+        filter needs.
+        """
+        ak = _ak()
+        stocks: list[dict] = []
+
+        try:
+            df = ak.stock_info_sh_name_code(symbol="主板A股")
+        except Exception as exc:  # noqa: BLE001 - keep the Shenzhen half usable
+            logger.warning("Shanghai list failed: {}", exc)
+            df = None
+        if df is not None and not df.empty:
+            code_col = _pick_column(df, ("证券代码", "代码", "code"))
+            name_col = _pick_column(df, ("证券简称", "简称", "name"))
+            date_col = _pick_column(df, ("上市日期", "上市时间", "list_date"))
+            for _, row in df.iterrows():
+                code = normalize_code(row[code_col])
+                if not is_main_board(code):
+                    continue
+                stocks.append(
+                    {
+                        "code": code,
+                        "name": str(row[name_col]).strip(),
+                        "exchange": "sh",
+                        "board": board_label(code),
+                        "list_date": _as_date(row[date_col]) if date_col else None,
+                        "industry": None,
+                    }
+                )
+
+        try:
+            df = ak.stock_info_sz_name_code(symbol="A股列表")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Shenzhen list failed: {}", exc)
+            df = None
+        if df is not None and not df.empty:
+            code_col = _pick_column(df, ("A股代码", "证券代码", "代码", "code"))
+            name_col = _pick_column(df, ("A股简称", "证券简称", "简称", "name"))
+            date_col = _pick_column(df, ("A股上市日期", "上市日期"))
+            industry_col = _pick_column(df, ("所属行业", "行业"))
+            for _, row in df.iterrows():
+                code = normalize_code(row[code_col])
+                if not is_main_board(code):
+                    continue
+                stocks.append(
+                    {
+                        "code": code,
+                        "name": str(row[name_col]).strip(),
+                        "exchange": "sz",
+                        "board": board_label(code),
+                        "list_date": _as_date(row[date_col]) if date_col else None,
+                        "industry": str(row[industry_col]).strip() if industry_col else None,
+                    }
+                )
+
+        # De-duplicate by code, preferring the row that carries a listing date.
+        by_code: dict[str, dict] = {}
+        for row in stocks:
+            current = by_code.get(row["code"])
+            if current is None or (current.get("list_date") is None and row.get("list_date")):
+                by_code[row["code"]] = row
+        return sorted(by_code.values(), key=lambda item: item["code"])
+
     def get_stock_list(self, main_board_only: bool = True) -> list[Stock]:
         ak = _ak()
         df = ak.stock_info_a_code_name()
@@ -129,6 +208,10 @@ class AkShareProvider:
             raise RuntimeError(f"unexpected daily bar columns: {list(df.columns)}")
         df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
         df["code"] = code
+        # AkShare reports 成交量 in lots (手); the rest of the app (Quote.volume)
+        # works in shares, so normalize once here.
+        if "volume" in df.columns:
+            df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0.0) * 100
         return df.sort_values("trade_date").reset_index(drop=True)
 
     # ------------------------------------------------------------------ financials

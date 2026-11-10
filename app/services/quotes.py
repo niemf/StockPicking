@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from loguru import logger
 
@@ -19,12 +20,39 @@ class QuoteService:
         self,
         providers: Iterable[QuoteProvider] | None = None,
         cache_seconds: int | None = None,
+        batch_size: int | None = None,
+        workers: int | None = None,
     ) -> None:
         self.providers = list(providers or [TencentProvider(settings.quote_timeout_seconds), SinaProvider(settings.quote_timeout_seconds)])
         self.cache_seconds = cache_seconds if cache_seconds is not None else settings.quote_cache_seconds
+        self.batch_size = max(1, batch_size or settings.quote_batch_size)
+        self.workers = max(1, workers or settings.quote_workers)
         self._cache: dict[str, tuple[float, Quote]] = {}
         self._index_cache: dict[str, tuple[float, Quote]] = {}
         self._lock = threading.Lock()
+
+    def _fetch_batched(self, provider: QuoteProvider, codes: list[str]) -> dict[str, Quote]:
+        """Fetch in parallel chunks; one bad batch must not discard the rest."""
+        chunks = [codes[i : i + self.batch_size] for i in range(0, len(codes), self.batch_size)]
+        if len(chunks) <= 1:
+            return provider.get_quotes(codes)
+
+        result: dict[str, Quote] = {}
+        with ThreadPoolExecutor(max_workers=min(self.workers, len(chunks))) as pool:
+            futures = {pool.submit(provider.get_quotes, chunk): chunk for chunk in chunks}
+            for future in as_completed(futures):
+                chunk = futures[future]
+                try:
+                    result.update(future.result())
+                except Exception as exc:  # noqa: BLE001 - isolate a failed chunk
+                    logger.warning(
+                        "{} batch failed ({} codes, first {}): {}",
+                        provider.name,
+                        len(chunk),
+                        chunk[0],
+                        exc,
+                    )
+        return result
 
     # ------------------------------------------------------------------ stocks
     def get_quotes(self, codes: Iterable[str]) -> dict[str, Quote]:
@@ -53,7 +81,7 @@ class QuoteService:
         if missing:
             for provider in self.providers:
                 try:
-                    raw = provider.get_quotes(missing)
+                    raw = self._fetch_batched(provider, missing)
                 except Exception as exc:  # noqa: BLE001 - provider failure must not break the page
                     logger.warning("{} quote request failed: {}", provider.name, exc)
                     continue

@@ -1,0 +1,241 @@
+"""Daily bar storage and fetching.
+
+Bootstrap once (``backfill``), then update the last few sessions every day
+(``incremental``). Writes happen only on the calling thread; worker threads are
+limited to HTTP so SQLite never sees concurrent writers.
+"""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date, timedelta
+
+import pandas as pd
+from loguru import logger
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.db.models import DailyBar
+from app.providers.akshare_provider import AkShareProvider
+
+UPSERT_CHUNK = 90  # 10 columns * 90 rows stays below SQLite's variable limit
+BAR_COLUMNS = (
+    "code",
+    "trade_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "pre_close",
+    "volume",
+    "amount",
+    "turnover_rate",
+    "adj_factor",
+)
+
+
+def _as_float(value, default: float | None = None) -> float | None:
+    try:
+        if value is None or pd.isna(value):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _frame_rows(code: str, df: pd.DataFrame) -> list[dict]:
+    rows: list[dict] = []
+    for record in df.to_dict("records"):
+        trade_date = record.get("trade_date")
+        if trade_date is None:
+            continue
+        if hasattr(trade_date, "date"):
+            trade_date = trade_date.date()
+        close = _as_float(record.get("close"))
+        if close is None or close <= 0:
+            continue
+        rows.append(
+            {
+                "code": code,
+                "trade_date": trade_date,
+                "open": _as_float(record.get("open"), close),
+                "high": _as_float(record.get("high"), close),
+                "low": _as_float(record.get("low"), close),
+                "close": close,
+                "pre_close": _as_float(record.get("pre_close")),
+                "volume": _as_float(record.get("volume"), 0.0),
+                "amount": _as_float(record.get("amount"), 0.0),
+                "turnover_rate": _as_float(record.get("turnover_rate")),
+                "adj_factor": _as_float(record.get("adj_factor"), 1.0),
+            }
+        )
+    return rows
+
+
+def upsert_bars(session: Session, code: str, df: pd.DataFrame) -> int:
+    """Insert or update one stock's bars. Returns the number of rows written."""
+    if df is None or df.empty:
+        return 0
+    rows = _frame_rows(code, df)
+    if not rows:
+        return 0
+
+    if session.get_bind().dialect.name == "sqlite":
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        for start in range(0, len(rows), UPSERT_CHUNK):
+            chunk = rows[start : start + UPSERT_CHUNK]
+            statement = sqlite_insert(DailyBar).values(chunk)
+            statement = statement.on_conflict_do_update(
+                index_elements=["code", "trade_date"],
+                set_={
+                    column: getattr(statement.excluded, column)
+                    for column in (
+                        "open",
+                        "high",
+                        "low",
+                        "close",
+                        "pre_close",
+                        "volume",
+                        "amount",
+                        "turnover_rate",
+                        "adj_factor",
+                    )
+                },
+            )
+            session.execute(statement)
+    else:  # portable fallback for PostgreSQL / MySQL during migration
+        for row in rows:
+            session.merge(DailyBar(**row))
+    return len(rows)
+
+
+def coverage(session: Session, codes: list[str] | None = None) -> dict[str, tuple[int, date | None]]:
+    statement = select(
+        DailyBar.code,
+        func.count().label("total"),
+        func.max(DailyBar.trade_date).label("latest"),
+    ).group_by(DailyBar.code)
+    if codes:
+        statement = statement.where(DailyBar.code.in_(codes))
+    return {
+        row.code: (int(row.total), row.latest)
+        for row in session.execute(statement)
+    }
+
+
+def _fetch_one(provider: AkShareProvider, code: str, start: date, end: date) -> pd.DataFrame:
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            time.sleep(0.05)
+            return provider.get_daily_bars(code, start=start, end=end)
+        except Exception as exc:  # noqa: BLE001 - retry transient provider errors
+            last_error = exc
+            time.sleep(0.4 * (attempt + 1))
+    raise RuntimeError(f"{code}: {last_error}")
+
+
+def _run_batch(
+    session: Session,
+    codes: list[str],
+    *,
+    start: date,
+    end: date,
+    workers: int,
+    label: str,
+) -> dict:
+    provider = AkShareProvider()
+    stats = {"requested": len(codes), "written": 0, "failed": []}
+    started = time.perf_counter()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_fetch_one, provider, code, start, end): code for code in codes}
+        for index, future in enumerate(as_completed(futures), start=1):
+            code = futures[future]
+            try:
+                df = future.result()
+                written = upsert_bars(session, code, df)
+                session.commit()
+                stats["written"] += written
+            except Exception as exc:  # noqa: BLE001 - a single stock must not stop the batch
+                session.rollback()
+                stats["failed"].append(code)
+                logger.warning("{} failed {}: {}", label, code, exc)
+            if index % 100 == 0 or index == len(codes):
+                logger.info(
+                    "{} progress {}/{} ({} failed, {} rows)",
+                    label,
+                    index,
+                    len(codes),
+                    len(stats["failed"]),
+                    stats["written"],
+                )
+
+    stats["elapsed_sec"] = round(time.perf_counter() - started, 1)
+    return stats
+
+
+def backfill_bars(
+    session: Session,
+    codes: list[str],
+    *,
+    days: int | None = None,
+    workers: int | None = None,
+    force: bool = False,
+) -> dict:
+    """Fetch history for stocks that do not have enough cached bars."""
+    days = days or settings.bar_backfill_days
+    workers = workers or settings.bar_fetch_workers
+    end = date.today()
+    start = end - timedelta(days=days)
+
+    existing = coverage(session, codes)
+    todo: list[str] = []
+    skipped = 0
+    for code in codes:
+        total, latest = existing.get(code, (0, None))
+        fresh = latest is not None and latest >= end - timedelta(days=7)
+        if not force and total >= 60 and fresh:
+            skipped += 1
+            continue
+        todo.append(code)
+
+    logger.info(
+        "backfill: {} requested, {} already fresh, {} to fetch ({}..{})",
+        len(codes),
+        skipped,
+        len(todo),
+        start,
+        end,
+    )
+    stats = _run_batch(session, todo, start=start, end=end, workers=workers, label="backfill")
+    stats["skipped"] = skipped
+    return stats
+
+
+def incremental_bars(
+    session: Session,
+    codes: list[str],
+    *,
+    days: int | None = None,
+    workers: int | None = None,
+) -> dict:
+    """Update the most recent sessions; stocks without history are left alone."""
+    days = days or settings.bar_incremental_days
+    workers = workers or settings.bar_fetch_workers
+    end = date.today()
+    start = end - timedelta(days=days)
+
+    existing = coverage(session, codes)
+    todo = [code for code in codes if existing.get(code, (0, None))[0] > 0]
+    missing = len(codes) - len(todo)
+    if missing:
+        logger.warning("incremental: {} stocks have no history; run backfill first", missing)
+
+    logger.info("incremental: {} stocks, {}..{}", len(todo), start, end)
+    stats = _run_batch(session, todo, start=start, end=end, workers=workers, label="incremental")
+    stats["missing_history"] = missing
+    return stats

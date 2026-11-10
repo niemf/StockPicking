@@ -19,12 +19,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.base import check_database, get_db
-from app.db.models import AlertEvent, AlertRule, Stock
+from app.db.models import AlertEvent, AlertRule, DailyBar, Stock
 from app.demo_data import INDICES, MARKET_REGIME, get_stock_detail, make_kline
 from app.providers.base import normalize_code
 from app.services import alerts as alert_service
 from app.services import monitor as monitor_service
 from app.services.calendar import session_status, sync_calendar
+from app.services.discovery import latest_candidates, latest_job, run_discovery
 from app.services.notifier import condition_text
 from app.services.portfolio import (
     PortfolioError,
@@ -307,6 +308,43 @@ def _chart_payload(code: str, base_price: float) -> dict:
     }
 
 
+def _real_chart_payload(db: Session, code: str, limit: int = 120) -> dict | None:
+    """K-line payload from cached daily bars; ``None`` when history is missing."""
+    rows = list(
+        db.scalars(
+            select(DailyBar)
+            .where(DailyBar.code == code)
+            .order_by(DailyBar.trade_date.desc())
+            .limit(limit)
+        )
+    )
+    if len(rows) < 5:
+        return None
+    rows.reverse()
+    closes = [float(row.close) for row in rows]
+
+    def moving_average(window: int) -> list[float | None]:
+        values: list[float | None] = []
+        for index in range(len(closes)):
+            if index + 1 < window:
+                values.append(None)
+            else:
+                chunk = closes[index + 1 - window : index + 1]
+                values.append(round(sum(chunk) / window, 2))
+        return values
+
+    return {
+        "dates": [row.trade_date.isoformat() for row in rows],
+        "kline": [
+            [float(row.open), float(row.close), float(row.low), float(row.high)] for row in rows
+        ],
+        "volume": [float(row.volume) for row in rows],
+        "ma5": moving_average(5),
+        "ma20": moving_average(20),
+        "base_price": closes[-1],
+    }
+
+
 # ------------------------------------------------------------------ pages
 @router.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db)):
@@ -566,7 +604,10 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "pnl_trend": _trend_class(market_value - cost_value),
         }
 
-    chart = _chart_payload(code, snap["price"])
+    chart = _real_chart_payload(db, code)
+    chart_real = chart is not None
+    if chart is None:
+        chart = _chart_payload(code, snap["price"])
 
     return render(
         request,
@@ -580,24 +621,79 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "detail": detail,
             "plan": plan,
             "position": position,
+            "industry": stock.industry if stock else None,
             "chart": chart,
+            "chart_real": chart_real,
             "regime": MARKET_REGIME,
         },
     )
 
 
 @router.get("/candidates")
-def candidates(request: Request):
+def candidates(request: Request, db: Session = Depends(get_db)):
+    trade_date, rows = latest_candidates(db, limit=100)
+    job = latest_job(db)
+    stats = (job.stats if job and job.stats else {}) or {}
+
+    quotes = (
+        quote_service.get_quotes([row.code for row in rows]) if rows else {}
+    )
+
+    items: list[dict] = []
+    for row in rows:
+        snapshot = row.indicator_snapshot or {}
+        quote = quotes.get(row.code)
+        price = quote.price if quote else snapshot.get("price_at_discovery")
+        pct_chg = quote.pct_chg if quote else snapshot.get("pct_chg_at_discovery")
+        breakdown = snapshot.get("score_breakdown") or {}
+        items.append(
+            {
+                "rank": row.rank,
+                "code": row.code,
+                "name": row.name,
+                "industry": snapshot.get("industry") or "—",
+                "score": row.score,
+                "price": price,
+                "pct_chg": pct_chg or 0.0,
+                "trend": _trend_class(pct_chg),
+                "breakdown": breakdown,
+                "snapshot": snapshot,
+                "rule_hits": (row.rule_hits or [])[:6],
+            }
+        )
+
     return render(
         request,
-        "placeholder.html",
+        "candidates.html",
         {
             "page": "candidates",
             "page_title": "候选池",
-            "icon": "🔍",
-            "title": "候选池建设中",
-            "description": "全主板规则初筛、技术面评分和 AI 分析将在下一阶段接入。当前可先查看自选股页面中的真实持仓与自选数据。",
+            "trade_date": trade_date,
+            "items": items,
+            "count": len(items),
+            "stats": stats,
+            "stages": stats.get("stages") or [],
+            "job": job,
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
+            "regime": MARKET_REGIME,
         },
+    )
+
+
+@router.post("/candidates/run")
+def candidates_run(db: Session = Depends(get_db)):
+    try:
+        output = run_discovery(db)
+    except Exception as exc:  # noqa: BLE001 - surface a readable message in the UI
+        return _redirect("/candidates", error=f"发现失败：{exc}")
+    summary = output["summary"]
+    return _redirect(
+        "/candidates",
+        ok=(
+            f"发现完成：{summary['codes']} 只股票 → {len(output['candidates'])} 只候选，"
+            f"用时 {summary['total_sec']} 秒"
+        ),
     )
 
 
@@ -693,6 +789,37 @@ def api_monitor_retry(db: Session = Depends(get_db)):
     from app.services.notifier import Notifier
 
     return Notifier().notify_pending(db)
+
+
+@router.get("/api/discovery/latest")
+def api_discovery_latest(limit: int = 50, db: Session = Depends(get_db)):
+    trade_date, rows = latest_candidates(db, limit=max(1, min(limit, 200)))
+    job = latest_job(db)
+    return {
+        "trade_date": trade_date.isoformat() if trade_date else None,
+        "stats": (job.stats if job and job.stats else {}) or {},
+        "count": len(rows),
+        "items": [
+            {
+                "rank": row.rank,
+                "code": row.code,
+                "name": row.name,
+                "score": row.score,
+                "rule_hits": row.rule_hits,
+                "snapshot": row.indicator_snapshot,
+            }
+            for row in rows
+        ],
+    }
+
+
+@router.post("/api/discovery/run")
+def api_discovery_run(
+    limit: int | None = None,
+    persist: bool = True,
+    db: Session = Depends(get_db),
+):
+    return run_discovery(db, persist=persist, limit=limit)
 
 
 @router.get("/api/quotes")
