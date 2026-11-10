@@ -11,7 +11,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
-from app.providers.base import is_main_board, normalize_code
+from app.providers.base import board_label, is_main_board, normalize_code
 
 
 @dataclass(slots=True)
@@ -43,15 +43,7 @@ def _pick_column(df: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
 
 
 def _board_label(code: str) -> str:
-    if code.startswith(("600", "601", "603", "605")):
-        return "沪市主板"
-    if code.startswith(("000", "001", "002", "003")):
-        return "深市主板"
-    if code.startswith(("688", "689")):
-        return "科创板"
-    if code.startswith(("300", "301")):
-        return "创业板"
-    return "其他"
+    return board_label(code)
 
 
 class AkShareProvider:

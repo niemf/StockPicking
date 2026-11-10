@@ -96,6 +96,22 @@ def is_main_board(code: str) -> bool:
     return value.startswith(("600", "601", "603", "605", "000", "001", "002", "003"))
 
 
+def board_label(code: str) -> str:
+    """Return a human-readable board name for a 6-digit A-share code."""
+    value = normalize_code(code)
+    if value.startswith(("600", "601", "603", "605")):
+        return "沪市主板"
+    if value.startswith(("000", "001", "002", "003")):
+        return "深市主板"
+    if value.startswith(("688", "689")):
+        return "科创板"
+    if value.startswith(("300", "301")):
+        return "创业板"
+    if value.startswith(("4", "8", "920")):
+        return "北交所"
+    return "其他"
+
+
 def safe_float(value: object, default: float = 0.0) -> float:
     try:
         text = str(value).strip()

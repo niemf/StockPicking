@@ -1,32 +1,58 @@
-"""Web routes and view models for the UI skeleton."""
+"""Web routes and view models.
+
+Pages read portfolio data from the database through ``app.services.portfolio``;
+live prices are overlaid from Tencent/Sina. Demo data is now only a seed source
+(``app.db.seed``) and the source of the AI/analysis prose.
+"""
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
+from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 
-from app.demo_data import (
-    ALERTS,
-    HOLDINGS,
-    INDICES,
-    MARKET_REGIME,
-    WATCHLIST,
-    get_stock_detail,
-    make_kline,
-)
+from app.config import settings
+from app.db.base import check_database, get_db
+from app.db.models import Stock
+from app.demo_data import ALERTS, INDICES, MARKET_REGIME, get_stock_detail, make_kline
 from app.providers.base import normalize_code
+from app.services.portfolio import (
+    PortfolioError,
+    add_holding,
+    add_watch,
+    holding_items,
+    remove_holding,
+    remove_watch,
+    update_holding,
+    watch_items,
+)
 from app.services.quotes import QuoteService
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
 # ------------------------------------------------------------------ filters
-templates.env.filters["money"] = lambda value: f"{value:,.2f}"
-templates.env.filters["price"] = lambda value: f"{value:,.2f}"
-templates.env.filters["pct"] = lambda value: f"{value:+.2f}%"
-templates.env.filters["compact"] = lambda value: f"{value / 10000:,.1f} 万"
+def _money(value) -> str:
+    return "—" if value is None else f"{value:,.2f}"
+
+
+def _pct(value) -> str:
+    return "—" if value is None else f"{value:+.2f}%"
+
+
+def _num(value) -> str:
+    return "—" if value is None else f"{value:.2f}"
+
+
+templates.env.filters["money"] = _money
+templates.env.filters["price"] = _money
+templates.env.filters["pct"] = _pct
+templates.env.filters["num2"] = _num
 
 quote_service = QuoteService()
 
@@ -37,13 +63,21 @@ def render(request: Request, name: str, context: dict):
     return templates.TemplateResponse(request, name, context)
 
 
+def _redirect(path: str, *, error: str | None = None, ok: str | None = None) -> RedirectResponse:
+    params = []
+    if error:
+        params.append(f"error={url_quote(error)}")
+    if ok:
+        params.append(f"ok={url_quote(ok)}")
+    url = f"{path}?{'&'.join(params)}" if params else path
+    return RedirectResponse(url, status_code=303)
+
+
 # ------------------------------------------------------------------ helpers
-def _trend_class(value: float) -> str:
-    if value > 0:
-        return "up"
-    if value < 0:
-        return "down"
-    return "flat"
+def _trend_class(value: float | None) -> str:
+    if value is None or value == 0:
+        return "flat"
+    return "up" if value > 0 else "down"
 
 
 def _rating_class(rating: str) -> str:
@@ -64,7 +98,7 @@ def _snapshot(quote, fallback_price: float, fallback_pct: float) -> dict:
         pre_close = price / (1 + fallback_pct / 100) if fallback_pct != -100 else price
         name = None
         ts = None
-        source = "demo"
+        source = "fallback"
     return {
         "price": price,
         "pct_chg": pct_chg,
@@ -77,9 +111,9 @@ def _snapshot(quote, fallback_price: float, fallback_pct: float) -> dict:
     }
 
 
-def _build_watchlist(quotes: dict) -> list[dict]:
+def _build_watchlist(rows: list[dict], quotes: dict) -> list[dict]:
     items: list[dict] = []
-    for row in WATCHLIST:
+    for row in rows:
         snap = _snapshot(quotes.get(row["code"]), row["fallback_price"], row["fallback_pct"])
         price = snap["price"]
         buy_low = row["buy_low"]
@@ -87,23 +121,28 @@ def _build_watchlist(quotes: dict) -> list[dict]:
         stop_loss = row["stop_loss"]
         take_profit = row["take_profit"]
 
-        if price > buy_high:
-            zone_status = "高于建仓区"
-            distance = (price - buy_high) / buy_high * 100
-            distance_text = f"距建仓区 +{distance:.2f}%"
-        elif price < buy_low:
-            zone_status = "低于建仓区"
-            distance = (buy_low - price) / buy_low * 100
-            distance_text = f"低于建仓区 {distance:.2f}%"
+        has_plan = bool(row["has_plan"] and buy_low and buy_high)
+        if not has_plan:
+            zone_status = "未设置计划"
+            zone_class = "out"
+            distance_text = "等待生成交易计划"
+            risk_reward = None
         else:
-            zone_status = "进入建仓区"
-            distance_text = "已在建仓区内"
-
-        risk_reward = (
-            (take_profit - price) / (price - stop_loss)
-            if price > stop_loss
-            else 0.0
-        )
+            if price > buy_high:
+                zone_status = "高于建仓区"
+                distance_text = f"距建仓区 +{(price - buy_high) / buy_high * 100:.2f}%"
+            elif price < buy_low:
+                zone_status = "低于建仓区"
+                distance_text = f"低于建仓区 {(buy_low - price) / buy_low * 100:.2f}%"
+            else:
+                zone_status = "进入建仓区"
+                distance_text = "已在建仓区内"
+            zone_class = "in" if zone_status == "进入建仓区" else "out"
+            risk_reward = (
+                (take_profit - price) / (price - stop_loss)
+                if take_profit and stop_loss and price > stop_loss
+                else None
+            )
 
         items.append(
             {
@@ -115,19 +154,24 @@ def _build_watchlist(quotes: dict) -> list[dict]:
                 "data_source": snap["source"],
                 "rating_class": _rating_class(row["rating"]),
                 "zone_status": zone_status,
-                "zone_class": "in" if zone_status == "进入建仓区" else "out",
+                "zone_class": zone_class,
                 "distance_text": distance_text,
-                "stop_distance": (price - stop_loss) / price * 100 if price else 0,
-                "tp_distance": (take_profit - price) / price * 100 if price else 0,
+                "stop_distance": (
+                    (price - stop_loss) / price * 100 if stop_loss and price else None
+                ),
+                "tp_distance": (
+                    (take_profit - price) / price * 100 if take_profit and price else None
+                ),
                 "risk_reward": risk_reward,
+                "has_plan": has_plan,
             }
         )
     return items
 
 
-def _build_holdings(quotes: dict) -> list[dict]:
+def _build_holdings(rows: list[dict], quotes: dict) -> list[dict]:
     items: list[dict] = []
-    for row in HOLDINGS:
+    for row in rows:
         snap = _snapshot(quotes.get(row["code"]), row["fallback_price"], row["fallback_pct"])
         price = snap["price"]
         cost = row["cost"]
@@ -140,11 +184,10 @@ def _build_holdings(quotes: dict) -> list[dict]:
 
         stop_loss = row["stop_loss"]
         tp1 = row["take_profit_1"]
-        tp2 = row["take_profit_2"]
-        stop_distance = (price - stop_loss) / price * 100 if price else 0.0
-        tp1_distance = (tp1 - price) / price * 100 if price else 0.0
+        stop_distance = (price - stop_loss) / price * 100 if stop_loss and price else None
+        tp1_distance = (tp1 - price) / price * 100 if tp1 and price else None
         progress = 0.0
-        if tp1 > cost:
+        if tp1 and cost and tp1 > cost:
             progress = (price - cost) / (tp1 - cost) * 100
         progress = max(0.0, min(100.0, progress))
 
@@ -221,22 +264,20 @@ def _chart_payload(code: str, base_price: float) -> dict:
 
 # ------------------------------------------------------------------ pages
 @router.get("/")
-def dashboard(request: Request):
-    codes = {row["code"] for row in WATCHLIST} | {row["code"] for row in HOLDINGS}
-    quotes = quote_service.get_quotes(codes)
-    watchlist = _build_watchlist(quotes)
-    holdings = _build_holdings(quotes)
+def dashboard(request: Request, db: Session = Depends(get_db)):
+    watch_rows = watch_items(db)
+    holding_rows = holding_items(db)
+    codes = {row["code"] for row in watch_rows} | {row["code"] for row in holding_rows}
+    quotes = quote_service.get_quotes(codes) if codes else {}
+    watchlist = _build_watchlist(watch_rows, quotes)
+    holdings = _build_holdings(holding_rows, quotes)
     totals = _totals(holdings)
     indices = _build_indices()
 
     allocation = [
-        {"name": item["name"], "value": round(item["market_value"], 2)}
-        for item in holdings
+        {"name": item["name"], "value": round(item["market_value"], 2)} for item in holdings
     ]
-    pnl_bars = [
-        {"name": item["name"], "value": round(item["pnl"], 2)}
-        for item in holdings
-    ]
+    pnl_bars = [{"name": item["name"], "value": round(item["pnl"], 2)} for item in holdings]
     ai_count = sum(1 for item in watchlist if item["source"] == "AI 候选")
     alert_counts = {
         "success": sum(1 for alert in ALERTS if alert["level"] == "success"),
@@ -267,9 +308,12 @@ def dashboard(request: Request):
 
 
 @router.get("/watchlist")
-def watchlist(request: Request):
-    quotes = quote_service.get_quotes([row["code"] for row in WATCHLIST])
-    items = _build_watchlist(quotes)
+def watchlist(request: Request, db: Session = Depends(get_db)):
+    rows = watch_items(db)
+    quotes = quote_service.get_quotes([row["code"] for row in rows]) if rows else {}
+    items = _build_watchlist(rows, quotes)
+    in_zone = sum(1 for item in items if item["zone_status"] == "进入建仓区")
+    ai_count = sum(1 for item in items if item["source"] == "AI 候选")
     return render(
         request,
         "watchlist.html",
@@ -278,15 +322,42 @@ def watchlist(request: Request):
             "page_title": "自选股",
             "items": items,
             "count": len(items),
+            "in_zone": in_zone,
+            "ai_count": ai_count,
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
             "regime": MARKET_REGIME,
         },
     )
 
 
+@router.post("/watchlist/add")
+def watchlist_add(
+    code: str = Form(...),
+    note: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        row = add_watch(db, code, source="manual", note=note or None)
+    except PortfolioError as exc:
+        return _redirect("/watchlist", error=str(exc))
+    return _redirect("/watchlist", ok=f"已添加 {row.name}（{row.code}）")
+
+
+@router.post("/watchlist/{watch_id}/delete")
+def watchlist_delete(watch_id: int, db: Session = Depends(get_db)):
+    try:
+        remove_watch(db, watch_id)
+    except PortfolioError as exc:
+        return _redirect("/watchlist", error=str(exc))
+    return _redirect("/watchlist", ok="已移除自选")
+
+
 @router.get("/holdings")
-def holdings(request: Request):
-    quotes = quote_service.get_quotes([row["code"] for row in HOLDINGS])
-    items = _build_holdings(quotes)
+def holdings(request: Request, db: Session = Depends(get_db)):
+    rows = holding_items(db)
+    quotes = quote_service.get_quotes([row["code"] for row in rows]) if rows else {}
+    items = _build_holdings(rows, quotes)
     totals = _totals(items)
     chart_items = [
         {
@@ -298,13 +369,28 @@ def holdings(request: Request):
     ]
 
     max_item = max(items, key=lambda item: item["market_value"]) if items else None
-    liquor_value = sum(item["market_value"] for item in items if item["industry"] == "白酒")
-    pingan = next((item for item in items if item["code"] == "601318"), None)
+    max_industry = max_item["industry"] if max_item else None
+    industry_value = (
+        sum(item["market_value"] for item in items if item["industry"] == max_industry)
+        if max_industry
+        else 0
+    )
     concentration = {
         "max_name": max_item["name"] if max_item else "—",
-        "max_pct": (max_item["market_value"] / totals["market_value"] * 100) if max_item and totals["market_value"] else 0,
-        "liquor_pct": (liquor_value / totals["market_value"] * 100) if totals["market_value"] else 0,
-        "pingan_stop_distance": pingan["stop_distance"] if pingan else 0,
+        "max_pct": (
+            (max_item["market_value"] / totals["market_value"] * 100)
+            if max_item and totals["market_value"]
+            else 0
+        ),
+        "industry_name": max_industry or "—",
+        "industry_pct": (
+            (industry_value / totals["market_value"] * 100) if totals["market_value"] else 0
+        ),
+        "closest_stop": min(
+            (item for item in items if item["stop_distance"] is not None),
+            key=lambda item: item["stop_distance"],
+            default=None,
+        ),
     }
 
     return render(
@@ -317,36 +403,103 @@ def holdings(request: Request):
             "chart_items": chart_items,
             "totals": totals,
             "concentration": concentration,
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
+            "today": date.today().isoformat(),
             "regime": MARKET_REGIME,
         },
     )
 
 
+@router.post("/holdings/add")
+def holdings_add(
+    code: str = Form(...),
+    cost_price: float = Form(...),
+    shares: int = Form(...),
+    stop_loss: float = Form(...),
+    take_profit_1: str | None = Form(default=None),
+    take_profit_2: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        row = add_holding(
+            db,
+            code=code,
+            cost_price=cost_price,
+            shares=shares,
+            stop_loss=stop_loss,
+            take_profit_1=float(take_profit_1) if take_profit_1 else None,
+            take_profit_2=float(take_profit_2) if take_profit_2 else None,
+        )
+    except (PortfolioError, ValueError) as exc:
+        return _redirect("/holdings", error=str(exc))
+    return _redirect("/holdings", ok=f"已记录持仓 {row.name}（{row.code}）")
+
+
+@router.post("/holdings/{holding_id}/stop")
+def holdings_update_stop(
+    holding_id: int,
+    current_stop: float = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        update_holding(db, holding_id, current_stop=current_stop)
+    except PortfolioError as exc:
+        return _redirect("/holdings", error=str(exc))
+    return _redirect("/holdings", ok="止损价已更新")
+
+
+@router.post("/holdings/{holding_id}/delete")
+def holdings_delete(holding_id: int, db: Session = Depends(get_db)):
+    try:
+        remove_holding(db, holding_id)
+    except PortfolioError as exc:
+        return _redirect("/holdings", error=str(exc))
+    return _redirect("/holdings", ok="持仓已删除")
+
+
 @router.get("/stock/{code}")
-def stock_detail(request: Request, code: str):
+def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
     try:
         code = normalize_code(code)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="无效的股票代码") from exc
 
     detail = get_stock_detail(code)
-    watch_row = next((row for row in WATCHLIST if row["code"] == code), None)
-    holding_row = next((row for row in HOLDINGS if row["code"] == code), None)
-    if detail is None and watch_row is None and holding_row is None:
-        raise HTTPException(status_code=404, detail="暂未收录该股票的演示数据")
+    watch_row = next((row for row in watch_items(db) if row["code"] == code), None)
+    holding_row = next((row for row in holding_items(db) if row["code"] == code), None)
+    stock = db.get(Stock, code)
+    if detail is None and watch_row is None and holding_row is None and stock is None:
+        raise HTTPException(status_code=404, detail="暂无该股票数据")
 
-    name = (watch_row or holding_row or {}).get("name", code)
-    base_price = (watch_row or holding_row or {}).get("fallback_price", 10.0)
+    name = (
+        (watch_row or holding_row or {}).get("name")
+        or (stock.name if stock else None)
+        or code
+    )
+    base_price = (
+        (watch_row or holding_row or {}).get("fallback_price")
+        or (watch_row or {}).get("buy_high")
+        or 10.0
+    )
     quote = quote_service.get_quote(code)
-    snap = _snapshot(quote, base_price, (watch_row or holding_row or {}).get("fallback_pct", 0.0))
+    snap = _snapshot(quote, base_price, 0.0)
 
     plan = None
-    if watch_row is not None:
+    if watch_row is not None and watch_row["has_plan"]:
         plan = {
             **watch_row,
             "rating_class": _rating_class(watch_row["rating"]),
-            "stop_distance": (snap["price"] - watch_row["stop_loss"]) / snap["price"] * 100,
-            "tp_distance": (watch_row["take_profit"] - snap["price"]) / snap["price"] * 100,
+            "stop_distance": (
+                (snap["price"] - watch_row["stop_loss"]) / snap["price"] * 100
+                if watch_row["stop_loss"]
+                else None
+            ),
+            "tp_distance": (
+                (watch_row["take_profit"] - snap["price"]) / snap["price"] * 100
+                if watch_row["take_profit"]
+                else None
+            ),
         }
 
     position = None
@@ -391,7 +544,7 @@ def candidates(request: Request):
             "page_title": "候选池",
             "icon": "🔍",
             "title": "候选池建设中",
-            "description": "全主板规则初筛、技术面评分和 AI 分析将在下一阶段接入。当前可先查看自选股页面中的演示数据。",
+            "description": "全主板规则初筛、技术面评分和 AI 分析将在下一阶段接入。当前可先查看自选股页面中的真实持仓与自选数据。",
         },
     )
 
@@ -414,7 +567,17 @@ def reports(request: Request):
 # ------------------------------------------------------------------ api
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "app": "TradeAI", "stage": "framework"}
+    database = check_database()
+    return {
+        "status": "ok" if database["ok"] else "degraded",
+        "app": settings.app_name,
+        "stage": "database",
+        "database": {
+            "ok": database["ok"],
+            "dialect": database["dialect"],
+            "path": database["path"],
+        },
+    }
 
 
 @router.get("/api/quotes")

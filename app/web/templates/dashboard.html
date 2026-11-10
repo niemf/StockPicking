@@ -5,7 +5,7 @@
   <div>
     <p class="eyebrow">OVERVIEW</p>
     <h1>今日仪表盘</h1>
-    <p class="subtitle">实时行情来自腾讯 / 新浪，财务与计划为演示数据，等待数据库与 AI 接入。</p>
+    <p class="subtitle">实时行情来自腾讯 / 新浪，自选、持仓与交易计划保存在本地数据库。</p>
   </div>
   <div class="page-head-actions">
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
@@ -84,7 +84,7 @@
               </td>
               <td>
                 <span>{{ item.shares }} 股</span>
-                <small>可用 {{ item.shares }} 股</small>
+                <small>可用 {{ item.available_shares }} 股</small>
               </td>
               <td>¥{{ item.market_value | money }}</td>
               <td class="{{ item.pnl_trend }}">
@@ -93,7 +93,7 @@
               </td>
               <td class="progress-cell">
                 <div class="mini-bar"><span style="width: {{ item.progress }}%"></span></div>
-                <small>止损 {{ item.stop_loss | price }} · 止盈 {{ item.take_profit_1 | price }}</small>
+                <small>止损 {{ item.stop_loss | num2 }} · 止盈 {{ item.take_profit_1 | num2 }}</small>
               </td>
             </tr>
             {% endfor %}
@@ -124,10 +124,16 @@
             <span class="{{ item.trend }}">{{ item.price | price }}</span>
             <span class="{{ item.trend }}">{{ item.pct_chg | pct }}</span>
           </div>
+          {% if item.has_plan %}
           <div class="watch-plan">
             <div><span>建仓区间</span><strong>{{ item.buy_low | price }} ~ {{ item.buy_high | price }}</strong></div>
-            <div><span>止损 / 止盈</span><strong>{{ item.stop_loss | price }} / {{ item.take_profit | price }}</strong></div>
+            <div><span>止损 / 止盈</span><strong>{{ item.stop_loss | num2 }} / {{ item.take_profit | num2 }}</strong></div>
           </div>
+          {% else %}
+          <div class="watch-plan">
+            <div><span>交易计划</span><strong class="muted">待生成</strong></div>
+          </div>
+          {% endif %}
           <div class="zone-pill {{ item.zone_class }}">{{ item.zone_status }} · {{ item.distance_text }}</div>
           <p class="watch-reason">{{ item.reason }}</p>
         </a>

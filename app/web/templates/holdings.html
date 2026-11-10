@@ -5,13 +5,16 @@
   <div>
     <p class="eyebrow">POSITIONS</p>
     <h1>持仓</h1>
-    <p class="subtitle">成本、浮动盈亏、止盈止损距离与仓位分布。行情为实时接口，成本与计划为演示数据。</p>
+    <p class="subtitle">成本、浮动盈亏、止盈止损距离与仓位分布。行情实时获取，持仓与计划保存在本地数据库。</p>
   </div>
   <div class="page-head-actions">
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
-    <button class="btn btn-primary" type="button" disabled>+ 记录交易（待接入）</button>
+    <a class="btn btn-primary" href="#add-holding">+ 记录持仓</a>
   </div>
 </section>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
 
 <section class="stat-grid">
   <article class="stat-card">
@@ -36,6 +39,39 @@
   </article>
 </section>
 
+<section class="add-panel panel" id="add-holding">
+  <form class="inline-form" method="post" action="/holdings/add">
+    <div class="field">
+      <label for="holding-code">股票代码</label>
+      <input id="holding-code" name="code" type="text" inputmode="numeric" maxlength="6"
+             placeholder="如 600036" pattern="\d{6}" required>
+    </div>
+    <div class="field field-sm">
+      <label for="holding-cost">成本价</label>
+      <input id="holding-cost" name="cost_price" type="number" step="0.001" min="0.001" required>
+    </div>
+    <div class="field field-sm">
+      <label for="holding-shares">股数</label>
+      <input id="holding-shares" name="shares" type="number" step="100" min="100" required>
+    </div>
+    <div class="field field-sm">
+      <label for="holding-stop">止损价</label>
+      <input id="holding-stop" name="stop_loss" type="number" step="0.001" min="0.001" required>
+    </div>
+    <div class="field field-sm">
+      <label for="holding-tp1">止盈一</label>
+      <input id="holding-tp1" name="take_profit_1" type="number" step="0.001" min="0.001" placeholder="可选">
+    </div>
+    <div class="field field-sm">
+      <label for="holding-tp2">止盈二</label>
+      <input id="holding-tp2" name="take_profit_2" type="number" step="0.001" min="0.001" placeholder="可选">
+    </div>
+    <button class="btn btn-primary" type="submit">保存持仓</button>
+    <span class="field-hint">股数需为 100 的整数倍，止损价必须低于成本价</span>
+  </form>
+</section>
+
+{% if items %}
 <div class="dashboard-grid">
   <div class="stack">
     <section class="panel">
@@ -74,7 +110,7 @@
               </td>
               <td>
                 <span>{{ item.shares }} 股</span>
-                <small>可用 {{ item.shares }} 股</small>
+                <small>可用 {{ item.available_shares }} 股</small>
               </td>
               <td>¥{{ item.market_value | money }}</td>
               <td class="{{ item.pnl_trend }}">
@@ -86,12 +122,14 @@
                 <small>当日</small>
               </td>
               <td>
-                <span class="down">{{ item.stop_loss | price }}</span>
-                <small>止盈 {{ item.take_profit_1 | price }} / {{ item.take_profit_2 | price }}</small>
+                <span class="down">{{ item.stop_loss | num2 }}</span>
+                <small>止盈 {{ item.take_profit_1 | num2 }} / {{ item.take_profit_2 | num2 }}</small>
               </td>
               <td class="progress-cell">
                 <div class="mini-bar"><span style="width: {{ item.progress }}%"></span></div>
-                <small>距止损 {{ '%.2f' | format(item.stop_distance) }}% · 距止盈一 {{ '%.2f' | format(item.tp1_distance) }}%</small>
+                <small>
+                  距止损 {{ item.stop_distance | num2 }}% · 距止盈一 {{ item.tp1_distance | num2 }}%
+                </small>
               </td>
             </tr>
             {% endfor %}
@@ -132,8 +170,12 @@
       </div>
       <ul class="reason-list">
         <li>单票仓位上限 15%，当前最大持仓为{{ concentration.max_name }}，占比约 {{ '%.1f' | format(concentration.max_pct) }}%。</li>
-        <li>白酒行业合计占比约 {{ '%.1f' | format(concentration.liquor_pct) }}%，注意行业集中度。</li>
-        <li>中国平安距止损 {{ '%.2f' | format(concentration.pingan_stop_distance) }}%，建议关注 MA20 得失。</li>
+        <li>行业集中度最高为{{ concentration.industry_name }}，合计占比约 {{ '%.1f' | format(concentration.industry_pct) }}%。</li>
+        {% if concentration.closest_stop %}
+        <li>{{ concentration.closest_stop.name }}距止损 {{ '%.2f' | format(concentration.closest_stop.stop_distance) }}%，为当前最接近止损的持仓。</li>
+        {% else %}
+        <li>暂无设置止损的持仓，建议补齐风险线。</li>
+        {% endif %}
       </ul>
       <div class="advice">{{ regime.position_advice }}</div>
     </section>
@@ -142,19 +184,27 @@
       <div class="panel-head">
         <div>
           <h2>止盈止损规则</h2>
-          <p>当前生效的持仓计划</p>
+          <p>修改后立即生效</p>
         </div>
       </div>
       <div class="rule-list">
         {% for item in items %}
-        <div class="rule-row">
+        <div class="rule-row rule-row-edit">
           <div>
             <strong>{{ item.name }}</strong>
-            <small>计划 {{ item.plan_id }}</small>
+            <small>计划 {{ item.plan_id }} · 止盈 {{ item.take_profit_1 | num2 }}</small>
           </div>
-          <div class="rule-values">
-            <span class="down">止损 {{ item.stop_loss | price }}</span>
-            <span class="up">止盈 {{ item.take_profit_1 | price }}</span>
+          <div class="rule-actions">
+            <form class="rule-form" method="post" action="/holdings/{{ item.id }}/stop">
+              <input name="current_stop" type="number" step="0.001" min="0.001"
+                     value="{{ item.stop_loss | num2 if item.stop_loss is not none else '' }}"
+                     aria-label="{{ item.name }} 止损价" required>
+              <button class="btn btn-ghost btn-xs" type="submit">更新止损</button>
+            </form>
+            <form method="post" action="/holdings/{{ item.id }}/delete"
+                  onsubmit="return confirm('确认删除 {{ item.name }} 的持仓记录？交易流水将一并删除。');">
+              <button class="btn btn-danger btn-xs" type="submit">删除</button>
+            </form>
           </div>
         </div>
         {% endfor %}
@@ -162,6 +212,12 @@
     </section>
   </aside>
 </div>
+{% else %}
+<section class="empty-state">
+  <strong>暂无持仓</strong>
+  <p>在上方填写成本、股数与止损价，建立第一条持仓记录。</p>
+</section>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

@@ -43,19 +43,25 @@ TradeAI/
 ├── app/
 │   ├── main.py                 # FastAPI 入口
 │   ├── config.py               # 配置（pydantic-settings）
-│   ├── demo_data.py            # 页面演示数据（后续替换为数据库）
+│   ├── demo_data.py            # 演示数据（现仅用于播种与 AI 文案）
+│   ├── db/
+│   │   ├── base.py             # 引擎 / 会话 / 建表 / 健康检查
+│   │   ├── models.py           # 16 张表的 SQLAlchemy 模型
+│   │   └── seed.py             # 演示数据播种（幂等）
 │   ├── providers/              # 行情数据源
 │   │   ├── base.py             # Quote / Protocol
 │   │   ├── tencent.py          # 腾讯实时行情
 │   │   ├── sina.py             # 新浪实时行情
 │   │   └── akshare_provider.py # AkShare 日线/财务/公告/日历
 │   ├── services/
-│   │   └── quotes.py           # 行情服务（多源降级 + 缓存）
+│   │   ├── quotes.py           # 行情服务（多源降级 + 缓存）
+│   │   └── portfolio.py        # 自选 / 持仓 / 交易流水业务逻辑
 │   └── web/
 │       ├── routes.py           # 页面路由
 │       ├── templates/          # Jinja2 模板
 │       └── static/             # CSS / JS
 ├── scripts/
+│   ├── init_db.py              # 建表 / 播种 / 重置数据库
 │   ├── verify_quotes.py        # 腾讯/新浪实时行情验证
 │   ├── verify_akshare.py       # AkShare 日线/财务/公告验证
 │   ├── verify_feishu.py        # 飞书通知验证
@@ -63,7 +69,10 @@ TradeAI/
 │   ├── run.ps1                 # 启动开发服务器
 │   └── verify_all.ps1          # 一键跑全部数据源验证
 ├── tests/
-│   └── test_providers.py       # 解析逻辑单元测试
+│   ├── test_providers.py       # 行情解析单元测试
+│   ├── test_db.py              # 数据模型 / 约束 / 播种测试
+│   ├── test_portfolio.py       # 自选 / 持仓 / 成本与盈亏测试
+│   └── test_web.py             # 表单增删改 HTTP 流程测试
 ├── docs/
 │   └── 项目大纲.md              # 技术选型、页面地图、验证结果
 ├── .env.example
@@ -109,6 +118,36 @@ Copy-Item .env.example .env
 - `/candidates` 候选池（占位）
 - `/reports` 复盘（占位）
 
+## 数据库
+
+SQLite（WAL）+ SQLAlchemy ORM，文件位于 `data/tradeai.db`（已 gitignore）。
+换 PostgreSQL 只需改 `.env` 的 `DATABASE_URL`，模型与查询无需改动。
+
+```powershell
+# 建表（幂等，缺失的表会补建）
+& '.venv\python.exe' scripts\init_db.py
+
+# 建表 + 导入演示自选/持仓/计划
+& '.venv\python.exe' scripts\init_db.py --seed
+
+# 删库重建 + 播种（会清空数据）
+& '.venv\python.exe' scripts\init_db.py --reset --seed
+```
+
+自选股与持仓的增删改都在页面上完成：
+
+- `/watchlist`：输入 6 位代码加入自选，卡片右下角可移除；无计划的股票显示"未设置计划"。
+- `/holdings`：录入成本、股数、止损、止盈；表格下方可修改止损价或删除持仓。
+- 校验规则：仅主板代码、股数 100 的整数倍、止损必须低于成本价、止盈必须高于成本价。
+
+## 测试
+
+```powershell
+& '.venv\python.exe' -m pytest
+```
+
+当前 31 个测试全部通过，覆盖行情解析、数据库约束、自选/持仓业务逻辑与表单 HTTP 流程。
+
 ## 数据源验证
 
 ```powershell
@@ -130,8 +169,8 @@ Copy-Item .env.example .env
 
 ## 后续计划
 
-1. 数据库表与 SQLAlchemy 模型
-2. 自选股 / 持仓 / 交易计划 CRUD
+1. ✅ 数据库表与 SQLAlchemy 模型
+2. ✅ 自选股 / 持仓 CRUD（页面表单 + 服务层校验）
 3. 交易日历 + 盘中轮询 + 预警状态机
 4. 飞书 / 邮件通知
 5. 技术指标 + 全主板股票发现
