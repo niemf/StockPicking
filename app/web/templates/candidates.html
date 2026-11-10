@@ -16,6 +16,13 @@
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='扫描中…';">
       <button class="btn btn-primary" type="submit">运行全市场发现</button>
     </form>
+    <form method="post" action="/plans/generate"
+          onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='生成中…';">
+      <input type="hidden" name="limit" value="5">
+      <button class="btn btn-ghost" type="submit" {% if not has_key or not items %}disabled{% endif %}>
+        生成 Top 5 计划
+      </button>
+    </form>
   </div>
 </section>
 

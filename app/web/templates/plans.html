@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">TRADE PLANS</p>
+    <h1>交易计划</h1>
+    <p class="subtitle">
+      AI 只对候选池前 N 只生成计划，经系统校验后必须人工确认才会进入自选与监控。
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+    <a class="btn btn-ghost" href="/candidates">返回候选池</a>
+  </div>
+</section>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">今日 AI 花费</span>
+    <strong class="stat-value">¥{{ usage.cost }}</strong>
+    <span class="stat-sub">预算 ¥{{ usage.budget }} · 剩余 ¥{{ usage.remaining }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">今日调用</span>
+    <strong class="stat-value">{{ usage.calls }}</strong>
+    <span class="stat-sub">成功 {{ usage.success }} · 失败 {{ usage.failed }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">Tokens</span>
+    <strong class="stat-value">{{ usage.input_tokens + usage.output_tokens }}</strong>
+    <span class="stat-sub">输入 {{ usage.input_tokens }} · 输出 {{ usage.output_tokens }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">草稿计划</span>
+    <strong class="stat-value">{{ items | selectattr('status', 'equalto', 'draft') | list | length }}</strong>
+    <span class="stat-sub">共 {{ count }} 份 AI 计划</span>
+  </article>
+</section>
+
+<section class="panel add-panel">
+  <div class="panel-head">
+    <div>
+      <h2>生成计划</h2>
+      <p>候选日期 {{ candidate_date or '—' }} · 当前候选 {{ candidate_count }} 只</p>
+    </div>
+    {% if not has_key %}<span class="badge badge-warning">未配置 DEEPSEEK_API_KEY</span>{% endif %}
+  </div>
+  <form class="inline-form" method="post" action="/plans/generate"
+        onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='生成中…';">
+    <div class="field field-sm">
+      <label for="plan-limit">分析数量</label>
+      <select id="plan-limit" name="limit">
+        <option value="3">Top 3</option>
+        <option value="5" selected>Top 5</option>
+        <option value="10">Top 10</option>
+      </select>
+    </div>
+    <label class="check-field">
+      <input type="checkbox" name="force" value="true">
+      <span>忽略当日缓存重新生成</span>
+    </label>
+    <button class="btn btn-primary" type="submit" {% if not has_key %}disabled{% endif %}>
+      生成 AI 计划
+    </button>
+    <span class="field-hint">单只约 1–2k 输入 tokens；失败或超预算会停止</span>
+  </form>
+</section>
+
+<section class="filter-bar">
+  <a class="chip {% if status_filter == 'all' %}active{% endif %}" href="/plans">全部 {{ count }}</a>
+  <a class="chip {% if status_filter == 'draft' %}active{% endif %}" href="/plans?status=draft">待确认</a>
+  <a class="chip {% if status_filter == 'confirmed' %}active{% endif %}" href="/plans?status=confirmed">已确认</a>
+  <a class="chip {% if status_filter == 'rejected' %}active{% endif %}" href="/plans?status=rejected">已拒绝</a>
+</section>
+
+{% if items %}
+<section class="panel">
+  <div class="table-wrap">
+    <table class="data-table plans-table">
+      <thead>
+        <tr>
+          <th>状态</th>
+          <th>股票</th>
+          <th>建仓区间</th>
+          <th>止损 / 止盈</th>
+          <th>仓位 / 置信度</th>
+          <th>评级 / 风险</th>
+          <th>创建时间</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr>
+          <td>
+            <span class="badge badge-{{ 'success' if item.status == 'confirmed' else ('warning' if item.status == 'draft' else 'neutral') }}">
+              {{ {'draft': '待确认', 'confirmed': '已确认', 'rejected': '已拒绝', 'expired': '已过期'}.get(item.status, item.status) }}
+            </span>
+          </td>
+          <td>
+            <a class="stock-cell" href="/stock/{{ item.code }}">
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.code }} · {{ item.trade_date }}</small>
+            </a>
+          </td>
+          <td>{{ item.buy_low | num2 }} ~ {{ item.buy_high | num2 }}</td>
+          <td>
+            <span class="down">{{ item.stop_loss | num2 }}</span> /
+            <span class="up">{{ item.take_profit_1 | num2 }}</span>
+            <small class="muted">止盈二 {{ item.take_profit_2 | num2 }}</small>
+          </td>
+          <td>{{ item.position_pct | num2 }}% / {{ item.confidence | num2 }}%</td>
+          <td>
+            <span class="badge badge-{{ 'buy' if item.rating == '看多' else ('watch' if item.rating == '观察' else 'neutral') }}">{{ item.rating }}</span>
+            <small class="muted">风险 {{ item.risk_score | num2 }}</small>
+          </td>
+          <td><small>{{ item.created_at.strftime('%m-%d %H:%M') if item.created_at else '—' }}</small></td>
+          <td>
+            <div class="plan-actions">
+              {% if item.status == 'draft' %}
+              <form method="post" action="/plans/{{ item.id }}/confirm"
+                    onsubmit="return confirm('确认执行该计划并加入自选？');">
+                <button class="btn btn-primary btn-xs" type="submit">确认</button>
+              </form>
+              <form method="post" action="/plans/{{ item.id }}/reject">
+                <button class="btn btn-danger btn-xs" type="submit">拒绝</button>
+              </form>
+              {% else %}
+              <a class="btn btn-ghost btn-xs" href="/stock/{{ item.code }}">查看</a>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="empty-state">
+  <strong>暂无 AI 交易计划</strong>
+  <p>先运行全市场发现，再点击上方“生成 AI 计划”。确认后会自动加入自选并进入盘中预警。</p>
+</section>
+{% endif %}
+{% endblock %}

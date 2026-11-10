@@ -62,7 +62,10 @@ TradeAI/
 │   │   ├── monitor.py          # 盘中轮询编排
 │   │   ├── universe.py         # 股票池 / 上市日期 / 次新判断
 │   │   ├── bars.py             # 日线回补与增量更新
-│   │   └── discovery.py        # 全市场发现编排与候选落库
+│   │   ├── discovery.py        # 全市场发现编排与候选落库
+│   │   ├── ai.py               # DeepSeek 客户端 + 预算 + 调用日志
+│   │   ├── plans.py            # AI 计划生成 / 校验 / 人工确认
+│   │   └── review.py           # 每日复盘（确定性摘要 + AI 叙述）
 │   ├── analysis/
 │   │   ├── context.py          # 单股上下文 + 惰性指标缓存
 │   │   ├── features.py         # 指标构建器（可注册）
@@ -80,6 +83,8 @@ TradeAI/
 │   ├── sync_universe.py        # 同步全主板股票列表与上市日期
 │   ├── backfill_bars.py        # 日线回补 / 增量更新
 │   ├── discover.py             # 全市场技术面发现
+│   ├── generate_plans.py       # 为候选生成 AI 交易计划
+│   ├── daily_review.py         # 生成每日复盘
 │   ├── daily_update.py         # 盘后：增量日线 + 发现（可挂计划任务）
 │   ├── verify_quotes.py        # 腾讯/新浪实时行情验证
 │   ├── verify_akshare.py       # AkShare 日线/财务/公告验证
@@ -95,6 +100,7 @@ TradeAI/
 │   ├── test_alerts.py          # 规则生成 / 状态机 / 通知 / 轮询测试
 │   ├── test_analysis.py        # 指标 / 因子 / 漏斗测试
 │   ├── test_discovery.py       # 发现编排 / 日线存储 / 幂等测试
+│   ├── test_ai.py              # AI 客户端 / 预算 / 计划校验 / 复盘测试
 │   └── test_web.py             # 表单增删改 HTTP 流程测试
 ├── docs/
 │   ├── 项目大纲.md              # 技术选型、页面地图、验证结果
@@ -259,20 +265,50 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 > 已知限制：深市股票带行业字段，沪市交易所列表不含行业，因此部分沪市股票行业显示为“—”。后续可用东方财富行业板块接口批量补齐。
 
+## AI 交易计划与复盘
+
+先在 `.env` 配置：
+
+```ini
+DEEPSEEK_API_KEY=sk-...
+AI_DAILY_BUDGET_CNY=5
+```
+
+重启服务后进入 `/plans`，选择 Top 3/5/10 生成计划；也可以命令行执行：
+
+```powershell
+& '.venv\python.exe' scripts\generate_plans.py --limit 5
+& '.venv\python.exe' scripts\generate_plans.py --usage
+```
+
+生成的是 `draft` 计划，必须人工确认：
+
+- 确认后计划变为 `confirmed`，自动加入自选并绑定计划，下一次盘中轮询开始按该计划的止损/止盈生成规则；
+- 拒绝后标记为 `rejected`，不会进入监控；
+- 同一股票同一天同一 prompt 版本默认复用缓存，不重复计费。
+
+每日复盘：
+
+```powershell
+& '.venv\python.exe' scripts\daily_review.py            # 摘要 + AI 叙述
+& '.venv\python.exe' scripts\daily_review.py --no-ai    # 只生成确定性摘要
+```
+
+或访问 `/reports` 手动生成。建议 18:00 挂计划任务。
+
+**系统侧校验**：AI 输出会强制修正止损/止盈/仓位关系（止损低于买入下沿、止盈高于买入上沿、最小盈亏比 1.2、仓位 3%–15%），修正记录写入计划的 `raw_response`，不会直接生效。
+
 ## AI 使用与成本
 
-当前阶段（数据、指标、发现、预警）**不调用任何 AI**：`ai_call_log` 为 0 条，所有筛选、评分、通知都是本地确定性代码。慢的部分是网络取数，不是 AI。
-
-后续接入 DeepSeek 时按以下原则控制成本：
-
-- 只分析评分靠前的 10–30 只，绝不把全市场或原始 K 线发给模型；
-- 输入是压缩后的结构化 JSON（价格、均线、量比、RSI、ATR、评分、持仓/计划），单只约 1–2k tokens；
-- 每个交易日一次，盘中监控不调用 AI；
-- 结果按 `code + trade_date + prompt_version` 缓存，重跑不重复计费；
-- `ai_call_log` 记录 tokens 与费用，`AI_DAILY_BUDGET_CNY` 超预算直接拒绝调用；
-- AI 失败时使用规则兜底计划，不影响监控与发现。
-
-按 Top 20 估算，每日约 3–5 万输入 tokens + 1–2 万输出 tokens，成本远低于每天多次全量分析。
+| 控制项 | 实现 |
+|---|---|
+| 调用范围 | 只分析候选池 Top 3–10，不发全市场 |
+| 输入 | 结构化 JSON（价格、指标、评分），单只约 1–2k tokens |
+| 频率 | 每个交易日一次；盘中监控不调用 AI |
+| 缓存 | `code + trade_date + prompt_version`，确认/草稿均命中 |
+| 预算 | 调用前检查 `ai_call_log` 当日累计，超预算直接拒绝 |
+| 记账 | 每次调用记录输入/输出 tokens、耗时、费用、错误 |
+| 失败兜底 | AI 失败不影响发现、监控与预警；复盘仍生成确定性摘要 |
 
 ## 测试
 
@@ -280,7 +316,7 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 & '.venv\python.exe' -m pytest
 ```
 
-当前 77 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排与日线存储。
+当前 84 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、交易日历与盘中时段、预警状态机、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排、AI 预算/计划校验/复盘。
 
 ## 数据源验证
 
@@ -308,7 +344,7 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 3. ✅ 交易日历 + 盘中轮询 + 预警状态机
 4. ✅ 飞书 / 邮件通知
 5. ✅ 技术指标 + 全主板股票发现
-6. DeepSeek 交易计划与每日复盘
+6. ✅ DeepSeek 交易计划与每日复盘（填入 API key 后即可真实调用）
 7. Linux 部署与 7×24 运行
 
 ## 免责声明

@@ -19,14 +19,16 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.base import check_database, get_db
-from app.db.models import AlertEvent, AlertRule, DailyBar, Stock
+from app.db.models import AlertEvent, AlertRule, DailyBar, ReviewReport, Stock
 from app.demo_data import INDICES, MARKET_REGIME, get_stock_detail, make_kline
 from app.providers.base import normalize_code
 from app.services import alerts as alert_service
 from app.services import monitor as monitor_service
+from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
 from app.services.notifier import condition_text
+from app.services.plans import confirm_plan, generate_plans, plan_items, reject_plan
 from app.services.portfolio import (
     PortfolioError,
     add_holding,
@@ -38,6 +40,7 @@ from app.services.portfolio import (
     watch_items,
 )
 from app.services.quotes import QuoteService
+from app.services.review import generate_review, recent_reports
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -127,6 +130,29 @@ def _alert_counts(items: list[dict]) -> dict[str, int]:
         "success": sum(1 for item in items if item["level"] == "success"),
         "warning": sum(1 for item in items if item["level"] == "warning"),
         "info": sum(1 for item in items if item["level"] == "info"),
+    }
+
+
+def _plan_dict(plan) -> dict:
+    return {
+        "id": plan.id,
+        "plan_no": plan.plan_no,
+        "code": plan.code,
+        "name": plan.name,
+        "status": plan.status,
+        "source": plan.source,
+        "trade_date": plan.trade_date.isoformat() if plan.trade_date else None,
+        "rating": plan.rating,
+        "buy_zone_low": plan.buy_zone_low,
+        "buy_zone_high": plan.buy_zone_high,
+        "stop_loss": plan.stop_loss,
+        "take_profit_1": plan.take_profit_1,
+        "take_profit_2": plan.take_profit_2,
+        "position_pct": plan.position_pct,
+        "confidence": plan.confidence,
+        "risk_score": plan.risk_score,
+        "holding_horizon": plan.holding_horizon,
+        "created_at": plan.created_at.isoformat() if plan.created_at else None,
     }
 
 
@@ -676,6 +702,7 @@ def candidates(request: Request, db: Session = Depends(get_db)):
             "job": job,
             "error": request.query_params.get("error"),
             "notice": request.query_params.get("ok"),
+            "has_key": bool(settings.deepseek_api_key),
             "regime": MARKET_REGIME,
         },
     )
@@ -697,17 +724,129 @@ def candidates_run(db: Session = Depends(get_db)):
     )
 
 
-@router.get("/reports")
-def reports(request: Request):
+@router.get("/plans")
+def plans_page(request: Request, db: Session = Depends(get_db)):
+    status = request.query_params.get("status") or None
+    items = plan_items(db, status=status, limit=100)
+    usage = usage_summary(db)
+    latest_date, candidates = latest_candidates(db, limit=50)
     return render(
         request,
-        "placeholder.html",
+        "plans.html",
+        {
+            "page": "plans",
+            "page_title": "交易计划",
+            "items": items,
+            "count": len(items),
+            "status_filter": status or "all",
+            "usage": usage,
+            "candidate_count": len(candidates),
+            "candidate_date": latest_date,
+            "has_key": bool(settings.deepseek_api_key),
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
+            "regime": MARKET_REGIME,
+        },
+    )
+
+
+@router.post("/plans/generate")
+def plans_generate(
+    limit: int = Form(default=5),
+    force: bool = Form(default=False),
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    try:
+        result = generate_plans(db, limit=max(1, min(limit, 10)), force=force)
+    except AIError as exc:
+        return _redirect("/plans", error=str(exc))
+    message = result["message"]
+    if result["failed"]:
+        message += f"；首个错误：{result['failed'][0]['error']}"
+        return _redirect("/plans", error=message)
+    return _redirect("/plans", ok=message)
+
+
+@router.post("/plans/{plan_id}/confirm")
+def plans_confirm(plan_id: int, db: Session = Depends(get_db)):
+    from app.services.ai import AIError
+
+    try:
+        plan = confirm_plan(db, plan_id)
+    except AIError as exc:
+        return _redirect("/plans", error=str(exc))
+    return _redirect("/plans", ok=f"已确认 {plan.name} 的计划，并加入自选")
+
+
+@router.post("/plans/{plan_id}/reject")
+def plans_reject(plan_id: int, db: Session = Depends(get_db)):
+    from app.services.ai import AIError
+
+    try:
+        plan = reject_plan(db, plan_id)
+    except AIError as exc:
+        return _redirect("/plans", error=str(exc))
+    return _redirect("/plans", ok=f"已拒绝 {plan.name} 的计划")
+
+
+@router.get("/reports")
+def reports(request: Request, db: Session = Depends(get_db)):
+    reports_list = recent_reports(db, limit=60)
+    return render(
+        request,
+        "reports.html",
         {
             "page": "reports",
             "page_title": "复盘",
-            "icon": "📊",
-            "title": "复盘报告建设中",
-            "description": "每日 18:00 的大盘、板块、自选、持仓和候选池复盘将在 AI 接入后生成。",
+            "reports": reports_list,
+            "count": len(reports_list),
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
+            "regime": MARKET_REGIME,
+        },
+    )
+
+
+@router.post("/reports/generate")
+def reports_generate(
+    trade_date: str = Form(default=""),
+    use_ai: bool = Form(default=True),
+    force: bool = Form(default=False),
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    target = date.fromisoformat(trade_date) if trade_date else date.today()
+    try:
+        generate_review(db, trade_date=target, use_ai=use_ai, force=force)
+    except AIError as exc:
+        return _redirect("/reports", error=str(exc))
+    return _redirect("/reports", ok=f"{target} 复盘已生成")
+
+
+@router.get("/reports/{trade_date}")
+def report_detail(request: Request, trade_date: str, db: Session = Depends(get_db)):
+    try:
+        target = date.fromisoformat(trade_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="日期格式应为 YYYY-MM-DD") from exc
+    report = db.scalar(select(ReviewReport).where(ReviewReport.trade_date == target))
+    if report is None:
+        raise HTTPException(status_code=404, detail="暂无该日复盘")
+    raw = report.raw or {}
+    return render(
+        request,
+        "report_detail.html",
+        {
+            "page": "reports",
+            "page_title": f"复盘 {target}",
+            "report": report,
+            "data": raw.get("data") or {},
+            "ai_error": raw.get("ai_error"),
+            "usage": raw.get("usage"),
+            "regime": MARKET_REGIME,
         },
     )
 
@@ -789,6 +928,73 @@ def api_monitor_retry(db: Session = Depends(get_db)):
     from app.services.notifier import Notifier
 
     return Notifier().notify_pending(db)
+
+
+@router.get("/api/ai/usage")
+def api_ai_usage(db: Session = Depends(get_db)):
+    return usage_summary(db)
+
+
+@router.post("/api/ai/plans/generate")
+def api_ai_plans_generate(
+    limit: int = 5,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    try:
+        result = generate_plans(db, limit=max(1, min(limit, 20)), force=force)
+    except AIError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {
+        "message": result["message"],
+        "created": result["created"],
+        "cached": result["cached"],
+        "failed": result["failed"],
+        "plans": [_plan_dict(plan) for plan in result["plans"]],
+    }
+
+
+@router.post("/api/ai/review")
+def api_ai_review(
+    trade_date: str = "",
+    use_ai: bool = True,
+    force: bool = False,
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    target = date.fromisoformat(trade_date) if trade_date else date.today()
+    try:
+        report = generate_review(db, trade_date=target, use_ai=use_ai, force=force)
+    except AIError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {
+        "trade_date": report.trade_date.isoformat(),
+        "market_summary": report.market_summary,
+        "watch_summary": report.watch_summary,
+        "holding_summary": report.holding_summary,
+        "candidates_summary": report.candidates_summary,
+        "ai_narrative": report.ai_narrative,
+    }
+
+
+@router.get("/api/plans")
+def api_plans(status: str | None = None, limit: int = 100, db: Session = Depends(get_db)):
+    items = plan_items(db, status=status, limit=max(1, min(limit, 200)))
+    return {"count": len(items), "items": items}
+
+
+@router.post("/api/plans/{plan_id}/confirm")
+def api_plan_confirm(plan_id: int, db: Session = Depends(get_db)):
+    from app.services.ai import AIError
+
+    try:
+        plan = confirm_plan(db, plan_id)
+    except AIError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _plan_dict(plan)
 
 
 @router.get("/api/discovery/latest")

@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">REVIEW</p>
+    <h1>每日复盘</h1>
+    <p class="subtitle">结构化摘要由本地数据生成，AI 只负责撰写叙述与次日关注点。</p>
+  </div>
+  <div class="page-head-actions">
+    <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+  </div>
+</section>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+
+<section class="panel add-panel">
+  <form class="inline-form" method="post" action="/reports/generate"
+        onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='生成中…';">
+    <div class="field field-sm">
+      <label for="review-date">交易日</label>
+      <input id="review-date" name="trade_date" type="date">
+    </div>
+    <label class="check-field">
+      <input type="checkbox" name="use_ai" value="true" checked>
+      <span>生成 AI 叙述（消耗一次调用）</span>
+    </label>
+    <label class="check-field">
+      <input type="checkbox" name="force" value="true">
+      <span>覆盖已有复盘</span>
+    </label>
+    <button class="btn btn-primary" type="submit">生成复盘</button>
+    <span class="field-hint">留空日期表示今天；不勾选 AI 也能生成确定性摘要</span>
+  </form>
+</section>
+
+{% if reports %}
+<section class="report-grid">
+  {% for report in reports %}
+  <article class="report-card">
+    <div class="report-head">
+      <strong>{{ report.trade_date }}</strong>
+      <span class="badge badge-{{ 'success' if report.ai_narrative else 'neutral' }}">
+        {{ 'AI 叙述' if report.ai_narrative else '仅摘要' }}
+      </span>
+    </div>
+    <p class="report-line">{{ report.market_summary }}</p>
+    <p class="report-line">{{ report.holding_summary }}</p>
+    <p class="report-line">{{ report.candidates_summary }}</p>
+    <a class="link" href="/reports/{{ report.trade_date }}">查看完整复盘 →</a>
+  </article>
+  {% endfor %}
+</section>
+{% else %}
+<section class="empty-state">
+  <strong>暂无复盘报告</strong>
+  <p>建议每个交易日 18:00 运行 <code>python scripts/daily_review.py</code>，或在上面手动生成。</p>
+</section>
+{% endif %}
+{% endblock %}

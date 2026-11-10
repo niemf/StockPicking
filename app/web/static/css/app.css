@@ -1194,6 +1194,103 @@ a.watch-card:hover {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+.check-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 9px;
+  color: var(--muted);
+  font-size: 12px;
+  user-select: none;
+}
+
+.check-field input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--primary);
+}
+
+select {
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan-actions form {
+  display: flex;
+}
+
+.plans-table {
+  min-width: 980px;
+}
+
+.report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.report-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.report-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.report-head strong {
+  font-size: 15px;
+}
+
+.report-line {
+  margin: 0;
+  color: #4b5568;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.report-text {
+  margin: 0;
+  color: #3c465c;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.review-indices {
+  margin-top: 14px;
+}
+
+@media (max-width: 820px) {
+  .report-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 .alerts-table {
   min-width: 900px;
 }

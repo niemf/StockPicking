@@ -52,7 +52,13 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
+    deepseek_timeout_seconds: float = 60.0
     ai_daily_budget_cny: float = 5.0
+    ai_input_price_cny: float = 2.0   # 元 / 百万 tokens（按实际价格调整）
+    ai_output_price_cny: float = 8.0
+    ai_prompt_version: str = "plan-v1"
+    ai_review_prompt_version: str = "review-v1"
+    ai_max_plans: int = 10
 
     # Notification
     feishu_webhook: str = ""
