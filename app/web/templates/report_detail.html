@@ -39,6 +39,9 @@
       </div>
       <p class="report-text">{{ data.get('summaries', {}).get('sector_summary') }}</p>
       {% set sectors = data.get('sectors', {}) %}
+      {% if not sectors.get('available') %}
+      <p class="muted empty-note">东财资金流接口暂不可用（可能被限流），当前降级展示板块涨跌幅；稍后可用 /api/market/sector-flow?refresh=true 重试。</p>
+      {% endif %}
       {% if sectors.get('available') %}
       <div class="flow-grid">
         <div>
@@ -134,13 +137,31 @@
       <p class="muted empty-note">今日没有买卖记录。</p>
       {% endif %}
 
-      {% if ops.suggestions %}
-      <h4 class="flow-title">明日操作建议</h4>
-      <ul class="reason-list">
-        {% for row in ops.suggestions %}
-        <li><strong>{{ row.name }}（{{ row.code }}）</strong>：{{ row.suggestion }}（现价 {{ row.price }}，浮盈 {{ '%+.2f' | format(row.pnl_pct) }}%）</li>
-        {% endfor %}
-      </ul>
+      {% if data.holdings %}
+      <h4 class="flow-title">持仓明细与明日建议</h4>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>股票</th><th>现价 / 成本</th><th>今日盈亏</th><th>浮动盈亏</th><th>止损 / 止盈</th><th>明日建议</th></tr></thead>
+          <tbody>
+            {% for row in data.holdings %}
+            {% set today_pnl = row.get('today_pnl', 0) %}
+            {% set today_pct = row.get('today_pct', 0) %}
+            <tr>
+              <td><a class="stock-cell" href="/stock/{{ row.code }}"><strong>{{ row.name }}</strong><small>{{ row.code }} · 可用 {{ row.available_shares }} 股</small></a></td>
+              <td>{{ row.price }} / {{ row.cost }}</td>
+              <td class="{{ 'up' if today_pnl > 0 else ('down' if today_pnl < 0 else 'flat') }}">
+                {{ '%+.2f' | format(today_pnl) }}<small>{{ '%+.2f' | format(today_pct) }}%</small>
+              </td>
+              <td class="{{ 'up' if row.pnl > 0 else ('down' if row.pnl < 0 else 'flat') }}">
+                {{ '%+.2f' | format(row.pnl) }}<small>{{ '%+.2f' | format(row.pnl_pct) }}%</small>
+              </td>
+              <td><span class="down">{{ row.stop_loss or '—' }}</span> / <span class="up">{{ row.take_profit_1 or '—' }}</span></td>
+              <td><small>{{ row.suggestion }}</small></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
       {% endif %}
     </section>
 

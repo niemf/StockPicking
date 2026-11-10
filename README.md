@@ -309,6 +309,14 @@ AI_DAILY_BUDGET_CNY=5
 
 也可以访问 `/reports` 手动生成；建议每个交易日 18:00 挂计划任务。
 
+板块资金/龙虎榜接口被限流时：
+
+```powershell
+# 手动重试并刷新当日缓存
+curl.exe -X GET "http://127.0.0.1:8000/api/market/sector-flow?refresh=true"
+curl.exe -X GET "http://127.0.0.1:8000/api/market/lhb?refresh=true"
+```
+
 **系统侧校验**：AI 输出会强制修正止损/止盈/仓位关系（止损低于买入下沿、止盈高于买入上沿、最小盈亏比 1.2、仓位 3%–15%），修正记录写入计划的 `raw_response`，不会直接生效。
 
 ## AI 使用与成本

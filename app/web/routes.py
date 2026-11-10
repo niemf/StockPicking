@@ -27,6 +27,7 @@ from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
+from app.services.market_flow import get_lhb, get_sector_flow
 from app.services.notifier import condition_text
 from app.services.plans import confirm_plan, generate_plans, plan_items, reject_plan
 from app.services.portfolio import (
@@ -934,6 +935,16 @@ def api_monitor_retry(db: Session = Depends(get_db)):
 @router.get("/api/ai/usage")
 def api_ai_usage(db: Session = Depends(get_db)):
     return usage_summary(db)
+
+
+@router.get("/api/market/sector-flow")
+def api_sector_flow(refresh: bool = False):
+    return get_sector_flow(None, refresh=refresh)
+
+
+@router.get("/api/market/lhb")
+def api_lhb(refresh: bool = False):
+    return get_lhb(None, refresh=refresh)
 
 
 @router.post("/api/ai/plans/generate")

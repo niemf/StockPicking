@@ -161,6 +161,14 @@ def build_review_data(session: Session, trade_date: date | None = None) -> dict[
                 "available_shares": row["available_shares"],
                 "pnl": round(pnl, 2),
                 "pnl_pct": round((price / row["cost"] - 1) * 100, 2) if row["cost"] else 0.0,
+                "today_pnl": round(
+                    (price - (quote.pre_close if quote else price)) * row["shares"], 2
+                ),
+                "today_pct": round(
+                    (price / quote.pre_close - 1) * 100, 2
+                )
+                if quote and quote.pre_close
+                else 0.0,
                 "stop_loss": row["stop_loss"],
                 "take_profit_1": row["take_profit_1"],
                 "suggestion": _suggestion(row, price),
@@ -253,8 +261,9 @@ def _summaries(data: dict) -> dict[str, str]:
 
     lhb = data["lhb"]
     if lhb.get("available"):
-        names = "、".join(item["name"] for item in lhb["net_buy"][:3])
-        lhb_summary = f"龙虎榜 {lhb['total']} 只，净买入靠前：{names}。"
+        buy_names = "、".join(item["name"] for item in lhb["net_buy"][:3])
+        sell_names = "、".join(item["name"] for item in lhb["net_sell"][:3])
+        lhb_summary = f"龙虎榜 {lhb['total']} 只，净买入靠前：{buy_names}；净卖出靠前：{sell_names}。"
     else:
         lhb_summary = "龙虎榜数据暂不可用。"
 
