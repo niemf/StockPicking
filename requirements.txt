@@ -14,6 +14,7 @@ python-multipart>=0.0.9
 sqlalchemy>=2.0.30
 pyyaml>=6.0
 pypinyin>=0.53.0
+baostock>=0.8.9
 
 # 开发与测试
 pytest>=8.3.0

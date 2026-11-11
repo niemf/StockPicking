@@ -240,8 +240,7 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
     response = client.get("/watchlist")
     assert response.status_code == 200
     assert "看多" in response.text
-    assert "评分 +6" in response.text
-    assert "多头排列" in response.text
+    assert "+6 · 多头排列" in response.text
     assert "MA20" in response.text
     assert "支撑" in response.text and "压力" in response.text
     assert "密集区" in response.text
@@ -249,6 +248,8 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
     assert "站上 MA20" in response.text
     assert "站上 MA20，量能温和" in response.text
     assert "重新生成" in response.text
+    assert "分组 / 标签" not in response.text
+    assert "银行" in response.text
 
 
 def test_watchlist_analyze_endpoint(client, monkeypatch) -> None:

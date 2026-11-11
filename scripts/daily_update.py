@@ -26,6 +26,7 @@ from app.providers.base import is_main_board  # noqa: E402
 from app.services.bars import bars_from_snapshot, incremental_bars  # noqa: E402
 from app.services.calendar import is_trading_day, market_session  # noqa: E402
 from app.services.discovery import run_discovery  # noqa: E402
+from app.services.industries import needs_sync, sync_industries  # noqa: E402
 from app.services.limit_board import get_lhb_seats, get_limit_pool  # noqa: E402
 from app.services.quotes import QuoteService  # noqa: E402
 from app.services.universe import sync_universe  # noqa: E402
@@ -54,6 +55,13 @@ def main() -> int:
         if not args.skip_universe:
             summary = sync_universe(session)
             print(f"股票池：新增 {summary['inserted']}，更新 {summary['updated']}")
+
+        if needs_sync():
+            try:
+                stats = sync_industries(session)
+                print(f"行业分类：{stats['count']} 个代码，更新 {stats['updated']} 只")
+            except Exception as exc:  # noqa: BLE001 - industry labels are optional
+                print(f"行业分类同步失败：{exc}")
 
         stocks = [
             stock

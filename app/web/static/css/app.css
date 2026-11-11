@@ -673,6 +673,88 @@ a.watch-card:hover {
   font-size: 16px;
 }
 
+.watch-name-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-title .tag-industry {
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 10.5px;
+}
+
+.watch-code {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.info-box {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--panel-soft);
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.info-grid span {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+
+.info-grid strong {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.info-grid strong small {
+  margin-left: 3px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 400;
+}
+
+.verdict-box {
+  background: #f7f8fb;
+}
+
+.verdict-box.up {
+  background: #fdf4f4;
+}
+
+.verdict-box.down {
+  background: #f4fbf7;
+}
+
+.verdict-value {
+  font-size: 16px;
+  color: #475569;
+}
+
+.verdict-box.up .verdict-value {
+  color: #dc2626;
+}
+
+.verdict-box.down .verdict-value {
+  color: #15803d;
+}
+
+.verdict-box .signal-chips {
+  margin: 10px 0 0;
+}
+
 .watch-title span {
   color: var(--muted);
   font-size: 11.5px;

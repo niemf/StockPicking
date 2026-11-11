@@ -74,8 +74,11 @@
   <article class="watch-card detailed">
     <div class="watch-top">
       <div class="watch-title">
-        <strong>{{ item.name }}</strong>
-        <span>{{ item.code }} · {{ item.industry }}</span>
+        <div class="watch-name-row">
+          <strong>{{ item.name }}</strong>
+          <span class="tag tag-industry">{{ item.industry }}</span>
+        </div>
+        <span class="watch-code">{{ item.code }}</span>
       </div>
       <div class="watch-badges">
         {% if item.has_plan %}
@@ -95,30 +98,41 @@
     </div>
 
     {% if item.tech and item.tech.available %}
-    <div class="verdict-strip {{ item.tech.verdict_class }}">
-      <strong class="verdict-label">{{ item.tech.verdict }}</strong>
-      <span class="verdict-meta">
-        评分 {{ '%+d' | format(item.tech.score) }} · {{ item.tech.trend }}
-        {% if item.tech.volume_ratio is not none %} · 量比 {{ item.tech.volume_ratio | num2 }}{% endif %}
-      </span>
+    <div class="info-box verdict-box {{ item.tech.verdict_class }}">
+      <div class="info-grid">
+        <div>
+          <span>结论</span>
+          <strong class="verdict-value">{{ item.tech.verdict }}</strong>
+        </div>
+        <div>
+          <span>评分 / 趋势</span>
+          <strong>{{ '%+d' | format(item.tech.score) }} · {{ item.tech.trend }}</strong>
+        </div>
+      </div>
+      <div class="signal-chips">
+        {% for signal in item.tech.key_signals[:2] %}
+        <span class="signal-chip {{ 'bull' if signal.weight > 0 else 'bear' }}">
+          {{ signal.label }}{% if signal.detail %} {{ signal.detail }}{% endif %}
+        </span>
+        {% endfor %}
+      </div>
     </div>
-    <div class="signal-chips">
-      {% for signal in item.tech.key_signals[:2] %}
-      <span class="signal-chip {{ 'bull' if signal.weight > 0 else 'bear' }}">
-        {{ signal.label }}{% if signal.detail %} {{ signal.detail }}{% endif %}
-      </span>
-      {% endfor %}
-    </div>
-    <div class="compact-levels">
-      <span>MA20 <strong>{{ item.tech.ma20 | num2 }}</strong>{% if item.tech.ma20_dist is not none %}（{{ item.tech.ma20_dist | pct }}）{% endif %}</span>
-      <span>MA60 <strong>{{ item.tech.ma60 | num2 }}</strong>{% if item.tech.ma60 is not none %}（{{ '压力' if item.tech.price < item.tech.ma60 else '支撑' }}）{% endif %}</span>
-      <span>支撑 <strong class="up">{{ item.tech.support | num2 }}</strong></span>
-      <span>压力 <strong class="down">{{ item.tech.resistance | num2 }}</strong></span>
-    </div>
-    <div class="compact-levels">
-      <span>密集区 <strong>{{ item.tech.dense_low | num2 }}–{{ item.tech.dense_high | num2 }}</strong></span>
-      <span>RSI <strong>{{ item.tech.rsi12 | num2 }}</strong></span>
-      <span>MACD <strong class="{{ 'up' if (item.tech.macd_hist or 0) > 0 else 'down' }}">{{ '正' if (item.tech.macd_hist or 0) > 0 else '负' }}</strong></span>
+
+    <div class="info-box">
+      <div class="info-grid">
+        <div>
+          <span>MA20</span>
+          <strong>{{ item.tech.ma20 | num2 }}{% if item.tech.ma20_dist is not none %}<small>{{ item.tech.ma20_dist | pct }}</small>{% endif %}</strong>
+        </div>
+        <div>
+          <span>MA60</span>
+          <strong>{{ item.tech.ma60 | num2 }}</strong>
+        </div>
+        <div><span>支撑</span><strong class="up">{{ item.tech.support | num2 }}</strong></div>
+        <div><span>压力</span><strong class="down">{{ item.tech.resistance | num2 }}</strong></div>
+        <div><span>筹码密集区</span><strong>{{ item.tech.dense_low | num2 }}–{{ item.tech.dense_high | num2 }}</strong></div>
+        <div><span>量比 / RSI</span><strong>{{ item.tech.volume_ratio | num2 }} / {{ item.tech.rsi12 | num2 }}</strong></div>
+      </div>
     </div>
     {% endif %}
 
@@ -128,17 +142,6 @@
       <div><span>止损</span><strong class="down">{{ item.stop_loss | num2 }}</strong></div>
       <div><span>止盈</span><strong class="up">{{ item.take_profit | num2 }}</strong></div>
       <div><span>建议仓位</span><strong>{{ item.position_pct | num2 }}{% if item.position_pct is not none %}%{% endif %}</strong></div>
-    </div>
-
-    <div class="meter-grid">
-      <div class="meter">
-        <div class="meter-head"><span>AI 置信度</span><strong>{{ item.confidence }}%</strong></div>
-        <div class="meter-bar"><span style="width: {{ item.confidence }}%"></span></div>
-      </div>
-      <div class="meter">
-        <div class="meter-head"><span>风险评分</span><strong>{{ item.risk }}%</strong></div>
-        <div class="meter-bar risk"><span style="width: {{ item.risk }}%"></span></div>
-      </div>
     </div>
     {% endif %}
 
@@ -164,26 +167,6 @@
         <button class="btn btn-ghost btn-xs" type="submit">生成 AI 研报卡</button>
       </form>
       {% endif %}
-    </details>
-
-    {% if item.watch_tags %}
-    <div class="tag-row">
-      {% for tag in item.watch_tags %}<span class="tag tag-watch">{{ tag }}</span>{% endfor %}
-    </div>
-    {% endif %}
-    {% if item.tags %}
-    <div class="tag-row">
-      {% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
-    </div>
-    {% endif %}
-
-    <details class="watch-edit">
-      <summary>分组 / 标签</summary>
-      <form method="post" action="/watchlist/{{ item.id }}/update">
-        <input name="group_name" type="text" maxlength="32" value="{{ item.group }}" list="group-options">
-        <input name="tags" type="text" maxlength="120" value="{{ item.watch_tags | join(',') }}" placeholder="标签，逗号分隔">
-        <button class="btn btn-ghost btn-sm" type="submit">保存</button>
-      </form>
     </details>
 
     <div class="watch-footer">

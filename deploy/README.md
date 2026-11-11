@@ -85,6 +85,7 @@ AI_DAILY_BUDGET_CNY=5
 # A. 全新开始：建表 + 同步股票列表 + 回补日线（约 10 分钟）
 sudo -u tradeai bash -c 'cd /opt/tradeai && .venv/bin/python scripts/init_db.py'
 sudo -u tradeai bash -c 'cd /opt/tradeai && .venv/bin/python scripts/sync_universe.py'
+sudo -u tradeai bash -c 'cd /opt/tradeai && .venv/bin/python scripts/sync_industries.py'
 sudo -u tradeai bash -c 'cd /opt/tradeai && .venv/bin/python scripts/backfill_bars.py'
 
 # B. 从 Windows 迁移：本地先做一致性备份
