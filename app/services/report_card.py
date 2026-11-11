@@ -40,7 +40,7 @@ REPORT_SYSTEM_PROMPT = """你是 A 股主板个股研究员。只根据用户提
 3. trend 只能是 上升、震荡、下降 之一。
 4. support 必须低于现价，resistance 必须高于现价，invalidation 不高于 support。
 5. risks / catalysts / checklist 是字符串数组，每项不超过 40 字；checklist 是 2–5 条可执行动作，至少一条说明“跌破 support 怎么办”。
-6. summary 不超过 300 字，只讨论量价与趋势，不承诺收益、不给出目标收益率。
+6. 页面已经展示现价、涨跌幅、成交额、换手率、均线、RSI、MACD、量比等数字，不要在 summary 中逐项复述；summary 用 2–3 句写核心矛盾、成立/失效条件与需要盯的点，不超过 200 字，不承诺收益。
 JSON 字段：
 conclusion, score, trend, trend_note, support, resistance, invalidation, summary, risks, catalysts, checklist"""
 
