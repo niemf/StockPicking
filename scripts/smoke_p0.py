@@ -43,6 +43,16 @@ def main() -> int:
         watch = pages["/watchlist"]
         check("watchlist import + export", "批量导入" in watch and "导出 CSV" in watch)
 
+        stock = client.get("/stock/600036")
+        check("GET /stock/600036", stock.status_code == 200, f"status={stock.status_code}")
+        check("stock report card panel", "AI 研报卡" in stock.text and "操作清单" in stock.text)
+        report_api = client.get("/api/reports/600036")
+        check(
+            "GET /api/reports/600036",
+            report_api.status_code == 200,
+            report_api.text[:120],
+        )
+
         sentiment = client.get("/api/market/sentiment")
         check("GET /api/market/sentiment", sentiment.status_code == 200, f"status={sentiment.status_code}")
         if sentiment.status_code == 200:

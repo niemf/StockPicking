@@ -23,7 +23,7 @@ from app.config import settings
 from app.db.base import check_database, get_db
 from app.db.models import AlertEvent, AlertRule, DailyBar, ReviewReport, Stock
 from app.demo_data import INDICES, MARKET_REGIME, get_stock_detail, make_kline
-from app.providers.base import normalize_code
+from app.providers.base import is_main_board, normalize_code
 from app.services import alerts as alert_service
 from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
@@ -48,6 +48,7 @@ from app.services.portfolio import (
     watch_items,
 )
 from app.services.quotes import QuoteService
+from app.services.report_card import generate_report, latest_report, recent_cards, report_dict
 from app.services.review import generate_review, recent_reports
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -726,6 +727,7 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
     if chart is None:
         chart = _chart_payload(code, snap["price"])
 
+    report_row = latest_report(db, code)
     return render(
         request,
         "stock_detail.html",
@@ -741,9 +743,30 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "industry": stock.industry if stock else None,
             "chart": chart,
             "chart_real": chart_real,
+            "report": report_dict(report_row) if report_row else None,
+            "notice": request.query_params.get("ok"),
+            "error": request.query_params.get("error"),
             "regime": MARKET_REGIME,
         },
     )
+
+
+@router.post("/stock/{code}/report")
+def stock_report_generate(
+    code: str,
+    refresh: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    try:
+        code = normalize_code(code)
+        row, cached, _, _ = generate_report(db, code, force=refresh == "1")
+    except (ValueError, AIError) as exc:
+        return _redirect(f"/stock/{code}", error=str(exc))
+    if cached:
+        return _redirect(f"/stock/{code}", ok="今日已有研报卡，未重复调用 AI")
+    return _redirect(f"/stock/{code}", ok=f"已生成研报卡：{row.conclusion} · {row.score} 分")
 
 
 @router.get("/candidates")
@@ -1089,6 +1112,44 @@ def api_lhb(refresh: bool = False):
 @router.get("/api/market/sentiment")
 def api_market_sentiment(refresh: bool = False, db: Session = Depends(get_db)):
     return market_sentiment(db, refresh=refresh, quote_service=quote_service)
+
+
+@router.get("/api/reports")
+def api_reports(limit: int = 20, db: Session = Depends(get_db)):
+    return {"items": recent_cards(db, limit=max(1, min(limit, 100)))}
+
+
+@router.get("/api/reports/{code}")
+def api_report(code: str, db: Session = Depends(get_db)):
+    try:
+        code = normalize_code(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="无效的股票代码") from exc
+    if not is_main_board(code):
+        raise HTTPException(status_code=404, detail="仅支持沪深主板")
+    row = latest_report(db, code)
+    if row is None:
+        return {"available": False, "code": code}
+    return {"available": True, **report_dict(row)}
+
+
+@router.post("/api/reports/{code}/generate")
+def api_report_generate(code: str, force: bool = False, db: Session = Depends(get_db)):
+    from app.services.ai import AIError
+
+    try:
+        code = normalize_code(code)
+        if not is_main_board(code):
+            raise ValueError("仅支持沪深主板 600/601/603/605、000/001/002/003")
+        row, cached, notes, log = generate_report(db, code, force=force)
+    except (ValueError, AIError) as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {
+        "cached": cached,
+        "notes": notes,
+        "cost": log.cost if log is not None else 0.0,
+        **report_dict(row),
+    }
 
 
 @router.post("/api/ai/plans/generate")

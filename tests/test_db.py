@@ -38,6 +38,7 @@ EXPECTED_TABLES = {
     "notification_log",
     "ai_call_log",
     "review_report",
+    "stock_report",
     "market_regime",
     "trade_calendar",
     "job_run",

@@ -362,6 +362,40 @@ class ReviewReport(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class StockReport(Base):
+    """AI 个股报告卡：把交易计划之外的研究结论单独存一份。
+
+    同一只股票、同一交易日、同一 prompt 版本只保留一张，重复生成会覆盖。
+    结论/评分/关键价位由模型给出，但经过系统校验与夹取，页面同时展示原始摘要。
+    """
+
+    __tablename__ = "stock_report"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(6), index=True)
+    name: Mapped[str] = mapped_column(String(32))
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
+    conclusion: Mapped[str] = mapped_column(String(8))  # 看多/中性/回避
+    score: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    trend: Mapped[str] = mapped_column(String(8))  # 上升/震荡/下降
+    trend_note: Mapped[str | None] = mapped_column(String(160), default=None)
+    support: Mapped[float | None] = mapped_column(Float, default=None)
+    resistance: Mapped[float | None] = mapped_column(Float, default=None)
+    invalidation: Mapped[float | None] = mapped_column(Float, default=None)
+    summary: Mapped[str | None] = mapped_column(Text, default=None)
+    risks: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    catalysts: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    checklist: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    model: Mapped[str | None] = mapped_column(String(64), default=None)
+    prompt_version: Mapped[str | None] = mapped_column(String(16), default=None)
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("trade_date", "code", "prompt_version", name="uq_report_date_code_ver"),
+    )
+
+
 class MarketRegime(Base):
     """市场风格判定，每个交易日一条。"""
 

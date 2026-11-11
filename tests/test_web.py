@@ -187,3 +187,37 @@ def test_alerts_custom_rule_create_and_delete(client) -> None:
     deleted = client.post(f"/alerts/rules/{rule.id}/delete")
     assert deleted.status_code == 303
     assert client.db.get(AlertRule, rule.id) is None
+
+
+def test_report_card_api_reports_missing(client) -> None:
+    response = client.get("/api/reports/600036")
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "code": "600036"}
+
+    bad = client.get("/api/reports/300750")
+    assert bad.status_code == 404
+
+
+def test_stock_detail_renders_report_panel(client, monkeypatch) -> None:
+    from app.providers.base import Quote
+
+    quote = Quote(
+        code="600036",
+        name="招商银行",
+        price=13.0,
+        pre_close=12.9,
+        open=13.0,
+        high=13.1,
+        low=12.8,
+        volume=1e6,
+        amount=2e8,
+        pct_chg=0.8,
+        change=0.1,
+        source="test",
+    )
+    monkeypatch.setattr("app.web.routes.quote_service.get_quote", lambda code: quote)
+
+    response = client.get("/stock/600036")
+    assert response.status_code == 200
+    assert "AI 研报卡" in response.text
+    assert "生成研报卡" in response.text
