@@ -97,6 +97,7 @@ TradeAI/
 │   ├── fetch_vendor.py         # 下载 ECharts / HTMX 到本地
 │   ├── run.ps1                 # 启动开发服务器
 │   ├── restart.ps1             # 杀掉旧进程后重启（改路由后必用）
+│   ├── schedule_tasks.ps1      # 注册/查看/移除 Windows 每日任务
 │   └── verify_all.ps1          # 一键跑全部数据源验证
 ├── tests/
 │   ├── test_providers.py       # 行情解析 + 批量抓取 + 降级测试
@@ -169,6 +170,25 @@ Copy-Item .env.example .env
 ```ini
 FEATURE_HOLDINGS=false   # 持仓模块默认关闭；true 才显示导航、仪表盘持仓面板与 /holdings 入口
 ```
+
+## 每日自动任务（Windows）
+
+```powershell
+# 注册三个任务（周一到周五，登录用户下运行）
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1
+
+# 查看状态 / 卸载
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -List
+powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
+```
+
+| 时间 | 任务 | 说明 |
+|---|---|---|
+| 08:45 | `premarket.py --send` | 盘前简报推飞书（零 AI） |
+| 15:35 | `daily_update.py` | 收盘快照 K 线 + 全市场发现 |
+| 18:00 | `daily_review.py` | 每日复盘（AI 叙述，约 0.015 元/天） |
+
+日志落在 `data\logs\tradeai-*.log`。任务只在登录状态下运行，电脑需开机；盘中预警仍由 `MONITOR_ENABLED=true` 的常驻进程负责。
 
 ## 数据库
 
