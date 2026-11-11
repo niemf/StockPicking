@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     bar_fetch_workers: int = 8
     discovery_top_n: int = 30
 
+    # Feature flags
+    # Holdings (cost / P&L) is kept in code but hidden by default: the product
+    # is positioned as watch + alert + research, not a portfolio ledger.
+    feature_holdings: bool = False
+
     # Monitoring / alerts
     monitor_enabled: bool = False
     monitor_timezone: str = "Asia/Shanghai"

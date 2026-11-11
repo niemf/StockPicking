@@ -14,6 +14,7 @@
 </section>
 
 <section class="stat-grid">
+  {% if feature_holdings %}
   <article class="stat-card">
     <span class="stat-label">持仓总市值</span>
     <strong class="stat-value">¥{{ totals.market_value | money }}</strong>
@@ -23,6 +24,27 @@
     <span class="stat-label">浮动盈亏</span>
     <strong class="stat-value {{ totals.trend }}">{{ totals.pnl | money }}</strong>
     <span class="stat-sub {{ totals.trend }}">{{ totals.pnl_pct | pct }} · 今日 {{ totals.today_pnl | money }}</span>
+  </article>
+  {% endif %}
+  <article class="stat-card">
+    <span class="stat-label">涨跌家数</span>
+    {% if sentiment.available %}
+    <strong class="stat-value"><span class="up">{{ sentiment.up }}</span> / <span class="down">{{ sentiment.down }}</span></strong>
+    <span class="stat-sub">{{ sentiment.label }} · 中位数 {{ sentiment.median_pct | pct }} · 平盘 {{ sentiment.flat }}</span>
+    {% else %}
+    <strong class="stat-value muted">—</strong>
+    <span class="stat-sub">行情快照不可用</span>
+    {% endif %}
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">涨停 / 跌停</span>
+    {% if sentiment.available %}
+    <strong class="stat-value"><span class="up">{{ sentiment.limit_up }}</span> / <span class="down">{{ sentiment.limit_down }}</span></strong>
+    <span class="stat-sub">成交 {{ sentiment.amount_yi }} 亿 · 涨超5% {{ sentiment.strong }} 只</span>
+    {% else %}
+    <strong class="stat-value muted">—</strong>
+    <span class="stat-sub">等待盘中快照</span>
+    {% endif %}
   </article>
   <article class="stat-card">
     <span class="stat-label">今日预警</span>
@@ -49,6 +71,7 @@
 
 <div class="dashboard-grid">
   <div class="stack">
+    {% if feature_holdings %}
     <section class="panel">
       <div class="panel-head">
         <div>
@@ -101,6 +124,7 @@
         </table>
       </div>
     </section>
+    {% endif %}
 
     <section class="panel">
       <div class="panel-head">
@@ -143,6 +167,37 @@
   </div>
 
   <aside class="stack">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>市场情绪</h2>
+          <p>全市场快照 · {{ sentiment.ts[11:16] if sentiment.ts else '—' }}</p>
+        </div>
+        <span class="badge badge-{{ 'success' if sentiment.available and sentiment.breadth >= 55 else ('warning' if sentiment.available and sentiment.breadth >= 45 else 'danger') }}">{{ sentiment.label or '—' }}</span>
+      </div>
+      {% if sentiment.available %}
+      <div class="breadth-bar">
+        <span class="breadth-up" style="width: {{ sentiment.breadth }}%"></span>
+        <span class="breadth-down" style="width: {{ 100 - sentiment.breadth }}%"></span>
+      </div>
+      <div class="breadth-legend">
+        <span class="up">上涨 {{ sentiment.up }}</span>
+        <span class="flat">平盘 {{ sentiment.flat }}</span>
+        <span class="down">下跌 {{ sentiment.down }}</span>
+      </div>
+      <div class="sentiment-grid">
+        <div><span>涨停</span><strong class="up">{{ sentiment.limit_up }}</strong></div>
+        <div><span>跌停</span><strong class="down">{{ sentiment.limit_down }}</strong></div>
+        <div><span>涨超5%</span><strong class="up">{{ sentiment.strong }}</strong></div>
+        <div><span>跌超5%</span><strong class="down">{{ sentiment.weak }}</strong></div>
+        <div><span>中位数</span><strong class="{{ 'up' if sentiment.median_pct > 0 else ('down' if sentiment.median_pct < 0 else 'flat') }}">{{ sentiment.median_pct | pct }}</strong></div>
+        <div><span>成交额</span><strong>{{ sentiment.amount_yi }} 亿</strong></div>
+      </div>
+      {% else %}
+      <p class="muted empty-note">暂无全市场快照（需先同步股票列表）。</p>
+      {% endif %}
+    </section>
+
     <section class="panel regime-panel">
       <div class="panel-head">
         <div>
@@ -188,6 +243,7 @@
       </div>
     </section>
 
+    {% if feature_holdings %}
     <section class="panel">
       <div class="panel-head">
         <div>
@@ -207,6 +263,7 @@
       </div>
       <div id="pnl-chart" class="chart chart-sm"></div>
     </section>
+    {% endif %}
   </aside>
 </div>
 {% endblock %}

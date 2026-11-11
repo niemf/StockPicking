@@ -43,6 +43,98 @@
   </article>
 </section>
 
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+
+<section class="panel" id="custom-rule">
+  <div class="panel-head">
+    <div>
+      <h2>自定义组合预警</h2>
+      <p>价格、涨跌幅、成交额、换手率自由组合，支持 AND / OR、每日次数上限与到期日</p>
+    </div>
+    <span class="badge badge-source">飞书优先</span>
+  </div>
+  <form class="inline-form rule-form" method="post" action="/alerts/rules">
+    <div class="field">
+      <label for="rule-code">股票代码</label>
+      <input id="rule-code" name="code" type="text" inputmode="numeric" maxlength="6"
+             placeholder="600036" pattern="\d{6}" required>
+    </div>
+    <div class="field">
+      <label for="rule-logic">组合逻辑</label>
+      <select id="rule-logic" name="logic">
+        <option value="AND">AND（全部满足）</option>
+        <option value="OR">OR（任一满足）</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="rule-metric-a">条件一</label>
+      <div class="condition-row">
+        <select id="rule-metric-a" name="metric_a">
+          {% for key, meta in metrics.items() %}<option value="{{ key }}">{{ meta.label }}（{{ meta.unit }}）</option>{% endfor %}
+        </select>
+        <select name="op_a">
+          {% for key, label in ops.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+        <input name="value_a" type="number" step="0.001" placeholder="阈值" required>
+      </div>
+    </div>
+    <div class="field">
+      <label for="rule-metric-b">条件二（可选）</label>
+      <div class="condition-row">
+        <select id="rule-metric-b" name="metric_b">
+          <option value="">不使用</option>
+          {% for key, meta in metrics.items() %}<option value="{{ key }}">{{ meta.label }}（{{ meta.unit }}）</option>{% endfor %}
+        </select>
+        <select name="op_b">
+          {% for key, label in ops.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+        <input name="value_b" type="number" step="0.001" placeholder="阈值">
+      </div>
+    </div>
+    <div class="field">
+      <label for="rule-channel">通知渠道</label>
+      <select id="rule-channel" name="channel">
+        {% for key, label in channels.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="rule-cap">每日上限</label>
+      <input id="rule-cap" name="max_per_day" type="number" min="1" max="50" value="5">
+    </div>
+    <div class="field">
+      <label for="rule-expiry">到期日（可选）</label>
+      <input id="rule-expiry" name="expires_on" type="date">
+    </div>
+    <button class="btn btn-primary" type="submit">保存规则</button>
+    <span class="field-hint">股票需先在自选；同一只股票只保留一条自定义规则，重新保存会覆盖。</span>
+  </form>
+
+  {% if rules %}
+  <div class="table-wrap rule-table">
+    <table class="data-table">
+      <thead><tr><th>股票</th><th>条件</th><th>渠道</th><th>每日上限</th><th>到期</th><th></th></tr></thead>
+      <tbody>
+        {% for rule in rules %}
+        <tr>
+          <td><a class="stock-cell" href="/stock/{{ rule.code }}"><strong>{{ rule.name }}</strong><small>{{ rule.code }}</small></a></td>
+          <td><span class="alert-condition">{{ rule.text }}</span></td>
+          <td>{{ rule.channel }}</td>
+          <td>{{ rule.max_per_day }}</td>
+          <td>{{ rule.expires_on or '长期' }}</td>
+          <td>
+            <form method="post" action="/alerts/rules/{{ rule.id }}/delete">
+              <button class="btn btn-ghost btn-sm" type="submit">删除</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</section>
+
 <section class="panel">
   <div class="panel-head">
     <div>

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db.models import AlertEvent, NotificationLog
-from app.services.alerts import rule_meta
+from app.services.alerts import RULE_METRICS, RULE_OPS, rule_meta
 
 Transport = Callable[[str, dict[str, Any]], tuple[int, str]]
 
@@ -31,6 +31,7 @@ SUGGESTIONS = {
     "TAKE_PROFIT_2": "到达第二止盈位，剩余仓位可用移动止盈跟踪。",
     "PRICE_IN_BUY_ZONE": "进入计划建仓区间，按计划分批执行，并确认止损位。",
     "PRICE_CHANGE": "波动异常，先检查公告、板块联动与成交量，再决定是否操作。",
+    "COMPOSITE": "自定义条件已满足，按你设定的计划处理，注意确认成交量与板块方向。",
 }
 
 DISCLAIMER = "本消息由个人工具生成，不构成投资建议。"
@@ -61,6 +62,19 @@ def _condition_text(rule_type: str, threshold: Any, snapshot: dict[str, Any]) ->
         return f"现价 {price} 进入建仓区间 {_fmt(params.get('buy_low'))} ~ {_fmt(params.get('buy_high'))}"
     if rule_type == "PRICE_CHANGE":
         return f"当日涨跌幅 {_fmt(snapshot.get('pct_chg'))}% 超过阈值 {_fmt(threshold)}%"
+    if rule_type == "COMPOSITE":
+        joiner = " 或 " if str(snapshot.get("logic") or "AND").upper() == "OR" else " 且 "
+        parts = []
+        for item in snapshot.get("conditions") or []:
+            meta = RULE_METRICS.get(item.get("metric"), {})
+            op = RULE_OPS.get(item.get("op"), item.get("op"))
+            actual = item.get("actual")
+            actual_text = f"（现值 {_fmt(actual)}）" if actual is not None else ""
+            parts.append(
+                f"{meta.get('label', item.get('metric'))} {op} "
+                f"{_fmt(item.get('value'))}{meta.get('unit', '')}{actual_text}"
+            )
+        return joiner.join(parts) or "自定义条件满足"
     return f"现价 {price} 触发 {rule_type}"
 
 
@@ -281,6 +295,23 @@ class Notifier:
     ) -> NotificationLog:
         """Send one event, with retry + channel fallback, and persist the log."""
         last_log: NotificationLog | None = None
+        preference = str((event.condition_snapshot or {}).get("channel") or "feishu")
+
+        if preference == "email":
+            ok = self._send_email(event)
+            log = NotificationLog(
+                event_id=event.id,
+                channel="email",
+                payload={"to": settings.smtp_to} if settings.smtp_to else None,
+                response="email sent" if ok else "email failed or not configured",
+                status="success" if ok else "failed",
+            )
+            session.add(log)
+            event.status = "sent" if ok else "failed"
+            if ok:
+                event.notified_at = datetime.now()
+            session.commit()
+            return log
 
         for attempt in range(1, retries + 1):
             ok, body, channel = self._send_feishu(event)
@@ -299,6 +330,8 @@ class Notifier:
                 event.status = "sent"
                 event.notified_at = datetime.now()
                 session.commit()
+                if preference == "both":
+                    self._send_email(event)
                 return last_log
 
             logger.warning("feishu send failed (attempt {}/{}): {}", attempt, retries, body[:120])

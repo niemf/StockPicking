@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -32,7 +32,23 @@ RULE_META: dict[str, dict[str, Any]] = {
     "TAKE_PROFIT_2": {"label": "止盈二", "priority": 20, "color": "green"},
     "PRICE_IN_BUY_ZONE": {"label": "进入建仓区", "priority": 50, "color": "blue"},
     "PRICE_CHANGE": {"label": "异动", "priority": 80, "color": "blue"},
+    "COMPOSITE": {"label": "自定义条件", "priority": 60, "color": "blue"},
 }
+
+# Metrics available to user-defined composite rules. Values are read straight
+# from the real-time quote so evaluation stays cheap and AI-free.
+RULE_METRICS: dict[str, dict[str, Any]] = {
+    "price": {"label": "价格", "unit": "元"},
+    "pct_chg": {"label": "涨跌幅", "unit": "%"},
+    "amount_yi": {"label": "成交额", "unit": "亿"},
+    "turnover_rate": {"label": "换手率", "unit": "%"},
+}
+
+RULE_OPS: dict[str, str] = {">=": "≥", "<=": "≤", ">": ">", "<": "<"}
+
+RULE_CHANNELS: dict[str, str] = {"feishu": "飞书", "email": "邮件", "both": "飞书 + 邮件"}
+
+METRIC_ALIASES = {"amount": "amount_yi", "turnover": "turnover_rate"}
 
 STOP_LIKE = {"STOP_LOSS", "TRAILING_STOP"}
 TARGET_LIKE = {"TAKE_PROFIT_1", "TAKE_PROFIT_2"}
@@ -62,6 +78,7 @@ def _spec(
         "confirm_samples": max(1, confirm_samples),
         "cooldown_sec": max(0, cooldown_sec),
         "rearm_threshold": rearm_pct / 100.0,
+        "auto": True,
     }
 
 
@@ -184,7 +201,7 @@ def ensure_rules(session: Session) -> dict[str, int]:
                     target_type=key[0],
                     target_id=key[1],
                     rule_type=key[2],
-                    params=dict(spec["params"]),
+                    params={**spec["params"], "auto": True},
                     enabled=True,
                     priority=spec["priority"],
                     confirm_samples=spec["confirm_samples"],
@@ -196,7 +213,7 @@ def ensure_rules(session: Session) -> dict[str, int]:
             continue
 
         state = (rule.params or {}).get("state")
-        merged = {**spec["params"]}
+        merged = {**spec["params"], "auto": True}
         if state is not None:
             merged["state"] = state
         if merged != (rule.params or {}):
@@ -207,7 +224,11 @@ def ensure_rules(session: Session) -> dict[str, int]:
         rule.cooldown_sec = spec["cooldown_sec"]
         rule.rearm_threshold = spec["rearm_threshold"]
 
-    orphans = [rule for key, rule in existing.items() if key not in desired]
+    orphans = [
+        rule
+        for key, rule in existing.items()
+        if key not in desired and bool((rule.params or {}).get("auto"))
+    ]
     for rule in orphans:
         session.delete(rule)
 
@@ -243,10 +264,69 @@ def _trailing_level(rule: AlertRule, holding: Holding) -> float | None:
     return level if level > 0 else None
 
 
+def _metric_value(metric: str, quote: Quote) -> float | None:
+    metric = METRIC_ALIASES.get(metric, metric)
+    if metric == "price":
+        return quote.price
+    if metric == "pct_chg":
+        return quote.pct_chg
+    if metric == "amount_yi":
+        return quote.amount / 1e8
+    if metric == "turnover_rate":
+        return quote.turnover_rate
+    return None
+
+
+def _compare(left: float, op: str, right: float) -> bool:
+    if op == ">=":
+        return left >= right
+    if op == "<=":
+        return left <= right
+    if op == ">":
+        return left > right
+    if op == "<":
+        return left < right
+    return False
+
+
+def eval_composite(params: dict[str, Any], quote: Quote) -> tuple[bool, list[dict[str, Any]]]:
+    """Evaluate the user-defined condition list; returns (triggered, detail)."""
+    conditions = params.get("conditions") or []
+    detail: list[dict[str, Any]] = []
+    for item in conditions:
+        try:
+            metric = str(item.get("metric") or "")
+            op = str(item.get("op") or ">=")
+            value = float(item.get("value"))
+        except (TypeError, ValueError):
+            continue
+        actual = _metric_value(metric, quote)
+        ok = actual is not None and _compare(actual, op, value)
+        detail.append(
+            {
+                "metric": metric,
+                "metric_label": RULE_METRICS.get(metric, {}).get("label", metric),
+                "op": op,
+                "value": value,
+                "actual": round(actual, 3) if actual is not None else None,
+                "ok": ok,
+            }
+        )
+    if not detail:
+        return False, detail
+    if str(params.get("logic") or "AND").upper() == "OR":
+        return any(item["ok"] for item in detail), detail
+    return all(item["ok"] for item in detail), detail
+
+
 def _condition(rule: AlertRule, quote: Quote, holding: Holding | None) -> tuple[bool, float | None]:
     """Return ``(is_triggered, threshold)``; threshold is stored for the card."""
     params = rule.params or {}
     price = quote.price
+
+    if rule.rule_type == "COMPOSITE":
+        triggered, _ = eval_composite(params, quote)
+        return triggered, None
 
     if rule.rule_type == "STOP_LOSS":
         stop = float(params.get("stop") or 0)
@@ -300,6 +380,10 @@ def _recovered(rule: AlertRule, quote: Quote) -> bool:
         threshold = float(params.get("threshold_pct") or 0)
         return abs(quote.pct_chg) < max(0.0, threshold - buffer * 100)
 
+    if rule.rule_type == "COMPOSITE":
+        # Composite rules re-arm as soon as the condition set is false.
+        return True
+
     return False
 
 
@@ -330,15 +414,20 @@ def _snapshot(
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "rule_type": rule.rule_type,
-        "rule_label": rule_meta(rule.rule_type)["label"],
+        "rule_label": (rule.params or {}).get("label") or rule_meta(rule.rule_type)["label"],
         "name": quote.name,
         "price": quote.price,
         "pct_chg": quote.pct_chg,
         "pre_close": quote.pre_close,
         "source": quote.source,
         "threshold": threshold,
+        "channel": (rule.params or {}).get("channel") or "feishu",
         "params": {k: v for k, v in (rule.params or {}).items() if k != "state"},
     }
+    if rule.rule_type == "COMPOSITE":
+        _, detail = eval_composite(rule.params or {}, quote)
+        snapshot["conditions"] = detail
+        snapshot["logic"] = (rule.params or {}).get("logic") or "AND"
     if holding is not None:
         pnl_pct = ((quote.price / holding.cost_price) - 1) * 100 if holding.cost_price else 0.0
         snapshot["holding"] = {
@@ -419,6 +508,16 @@ def evaluate(
 
         triggered, threshold = _condition(rule, quote, target if rule.target_type == "holding" else None)
 
+        if rule.rule_type == "COMPOSITE":
+            params = rule.params or {}
+            expires_on = params.get("expires_on")
+            if expires_on:
+                try:
+                    if date.fromisoformat(str(expires_on)) < trade_date:
+                        continue
+                except ValueError:
+                    pass
+
         if not triggered:
             state["consecutive"] = 0
             if not state["armed"] and _recovered(rule, quote):
@@ -438,6 +537,19 @@ def evaluate(
             except ValueError:
                 elapsed = float("inf")
             if elapsed < rule.cooldown_sec:
+                _save_state(rule, state)
+                continue
+
+        daily_cap = int((rule.params or {}).get("max_per_day") or 0)
+        if daily_cap > 0:
+            prefix = f"{target.code}:{rule.rule_type}:{trade_date.isoformat()}:%"
+            used = session.scalar(
+                select(func.count())
+                .select_from(AlertEvent)
+                .where(AlertEvent.dedup_key.like(prefix))
+            )
+            if int(used or 0) >= daily_cap:
+                state["armed"] = False
                 _save_state(rule, state)
                 continue
 
@@ -500,3 +612,154 @@ def seconds_until_next_poll(moment: datetime | None = None) -> int:
     moment = moment or datetime.now()
     target = (moment + timedelta(seconds=settings.poll_interval_seconds)).replace(microsecond=0)
     return max(1, int((target - moment).total_seconds()))
+
+
+# ------------------------------------------------------------------ custom rules
+def normalize_conditions(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate and normalize user input for a composite rule."""
+    cleaned: list[dict[str, Any]] = []
+    for item in raw[:4]:
+        metric = METRIC_ALIASES.get(str(item.get("metric") or ""), str(item.get("metric") or ""))
+        op = str(item.get("op") or "")
+        raw_value = item.get("value")
+        if not metric and raw_value in (None, ""):
+            continue
+        if metric not in RULE_METRICS:
+            raise ValueError(f"不支持的指标：{metric or '空'}")
+        if op not in RULE_OPS:
+            raise ValueError("比较方式只能是 >= / <= / > / <")
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("阈值必须是数字") from exc
+        if metric in {"price", "amount_yi"} and value <= 0:
+            raise ValueError("价格/成交额阈值必须大于 0")
+        if metric == "pct_chg" and abs(value) > 30:
+            raise ValueError("涨跌幅阈值需在 -30% ~ 30% 之间")
+        if metric == "turnover_rate" and not 0 <= value <= 100:
+            raise ValueError("换手率阈值需在 0 ~ 100 之间")
+        cleaned.append({"metric": metric, "op": op, "value": value})
+
+    if not cleaned:
+        raise ValueError("至少填写一个条件")
+    return cleaned
+
+
+def rule_text(rule: AlertRule) -> str:
+    params = rule.params or {}
+    if rule.rule_type != "COMPOSITE":
+        return rule_meta(rule.rule_type)["label"]
+    joiner = " 或 " if str(params.get("logic") or "AND").upper() == "OR" else " 且 "
+    parts = []
+    for item in params.get("conditions") or []:
+        meta = RULE_METRICS.get(item.get("metric"), {})
+        op = RULE_OPS.get(item.get("op"), item.get("op"))
+        parts.append(f"{meta.get('label', item.get('metric'))}{op}{item.get('value')}{meta.get('unit', '')}")
+    return joiner.join(parts) or rule_meta(rule.rule_type)["label"]
+
+
+def upsert_custom_rule(
+    session: Session,
+    code: str,
+    conditions: list[dict[str, Any]],
+    *,
+    logic: str = "AND",
+    channel: str = "feishu",
+    max_per_day: int = 5,
+    expires_on: date | None = None,
+    label: str | None = None,
+) -> AlertRule:
+    """Create or replace the single composite rule attached to a watch item."""
+    watch = session.scalar(
+        select(Watchlist).where(Watchlist.code == code, Watchlist.status == "active")
+    )
+    if watch is None:
+        raise ValueError("请先把该股票加入自选，再设置自定义预警")
+
+    logic = "OR" if str(logic).upper() == "OR" else "AND"
+    if channel not in RULE_CHANNELS:
+        raise ValueError("通知渠道只能是飞书 / 邮件 / 两者")
+    cleaned = normalize_conditions(conditions)
+
+    rule = session.scalar(
+        select(AlertRule).where(
+            AlertRule.target_type == "watch",
+            AlertRule.target_id == watch.id,
+            AlertRule.rule_type == "COMPOSITE",
+        )
+    )
+    state = (rule.params or {}).get("state") if rule is not None else None
+    params: dict[str, Any] = {
+        "logic": logic,
+        "conditions": cleaned,
+        "channel": channel,
+        "max_per_day": max(1, min(int(max_per_day), 50)),
+        "expires_on": expires_on.isoformat() if expires_on else None,
+        "auto": False,
+    }
+    if label:
+        params["label"] = label.strip()[:32]
+    if state is not None:
+        params["state"] = state
+
+    if rule is None:
+        rule = AlertRule(
+            target_type="watch",
+            target_id=watch.id,
+            rule_type="COMPOSITE",
+            params=params,
+            enabled=True,
+            priority=RULE_META["COMPOSITE"]["priority"],
+            confirm_samples=1,
+            cooldown_sec=settings.alert_cooldown_seconds,
+            rearm_threshold=settings.alert_rearm_pct / 100.0,
+        )
+        session.add(rule)
+    else:
+        rule.params = params
+        rule.enabled = True
+        rule.confirm_samples = 1
+        rule.cooldown_sec = settings.alert_cooldown_seconds
+        rule.rearm_threshold = settings.alert_rearm_pct / 100.0
+
+    session.commit()
+    return rule
+
+
+def list_custom_rules(session: Session) -> list[dict[str, Any]]:
+    rows = session.execute(
+        select(AlertRule, Watchlist)
+        .join(Watchlist, Watchlist.id == AlertRule.target_id)
+        .where(
+            AlertRule.target_type == "watch",
+            AlertRule.rule_type == "COMPOSITE",
+        )
+        .order_by(Watchlist.code)
+    ).all()
+    items: list[dict[str, Any]] = []
+    for rule, watch in rows:
+        params = rule.params or {}
+        items.append(
+            {
+                "id": rule.id,
+                "code": watch.code,
+                "name": watch.name,
+                "text": rule_text(rule),
+                "logic": params.get("logic") or "AND",
+                "channel": RULE_CHANNELS.get(params.get("channel") or "feishu", "飞书"),
+                "channel_key": params.get("channel") or "feishu",
+                "max_per_day": params.get("max_per_day") or 0,
+                "expires_on": params.get("expires_on"),
+                "enabled": rule.enabled,
+            }
+        )
+    return items
+
+
+def delete_custom_rule(session: Session, rule_id: int) -> bool:
+    rule = session.get(AlertRule, rule_id)
+    if rule is None or rule.rule_type != "COMPOSITE":
+        return False
+    session.delete(rule)
+    session.commit()
+    return True

@@ -5,10 +5,11 @@
   <div>
     <p class="eyebrow">WATCHLIST</p>
     <h1>自选股</h1>
-    <p class="subtitle">共 {{ count }} 只 · {{ ai_count }} 只来自 AI 候选。行情实时获取，计划与持仓数据来自本地数据库。</p>
+    <p class="subtitle">共 {{ count }} 只 · 当前显示 {{ filtered }} 只 · {{ ai_count }} 只来自 AI 候选。支持分组、标签与拼音搜索。</p>
   </div>
   <div class="page-head-actions">
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+    <a class="btn btn-ghost" href="/watchlist/export.csv">导出 CSV</a>
     <a class="btn btn-primary" href="#add-watch">+ 添加自选</a>
   </div>
 </section>
@@ -17,11 +18,15 @@
 {% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
 
 <section class="filter-bar">
-  <button class="chip active" type="button">全部 {{ count }}</button>
-  <button class="chip" type="button">AI 候选 {{ ai_count }}</button>
-  <button class="chip" type="button">手动添加 {{ count - ai_count }}</button>
-  <button class="chip" type="button">进入建仓区 {{ in_zone }}</button>
-  <span class="filter-hint">筛选交互将随后续版本启用</span>
+  <a class="chip {{ 'active' if group == '全部' }}" href="/watchlist{% if query %}?q={{ query | urlencode }}{% endif %}">全部 {{ count }}</a>
+  {% for name in groups %}
+  <a class="chip {{ 'active' if group == name }}" href="/watchlist?group={{ name | urlencode }}{% if query %}&q={{ query | urlencode }}{% endif %}">{{ name }}</a>
+  {% endfor %}
+  <form class="search-form" method="get" action="/watchlist">
+    {% if group and group != '全部' %}<input type="hidden" name="group" value="{{ group }}">{% endif %}
+    <input type="search" name="q" value="{{ query }}" placeholder="代码 / 名称 / 拼音首字母">
+    <button class="btn btn-ghost btn-sm" type="submit">搜索</button>
+  </form>
 </section>
 
 <section class="add-panel panel" id="add-watch">
@@ -31,6 +36,17 @@
       <input id="watch-code" name="code" type="text" inputmode="numeric" maxlength="6"
              placeholder="如 600036" pattern="\d{6}" required>
     </div>
+    <div class="field">
+      <label for="watch-group">分组</label>
+      <input id="watch-group" name="group_name" type="text" maxlength="32" placeholder="默认" list="group-options">
+      <datalist id="group-options">
+        {% for name in groups %}<option value="{{ name }}">{% endfor %}
+      </datalist>
+    </div>
+    <div class="field">
+      <label for="watch-tags">标签</label>
+      <input id="watch-tags" name="tags" type="text" maxlength="120" placeholder="银行,低波">
+    </div>
     <div class="field field-grow">
       <label for="watch-note">备注（可选）</label>
       <input id="watch-note" name="note" type="text" maxlength="120" placeholder="关注理由 / 触发条件">
@@ -38,6 +54,18 @@
     <button class="btn btn-primary" type="submit">加入自选</button>
     <span class="field-hint">仅支持沪深主板 600/601/603/605、000/001/002/003</span>
   </form>
+
+  <details class="import-box">
+    <summary>批量导入（每行：代码,分组,备注,标签）</summary>
+    <form method="post" action="/watchlist/import">
+      <textarea name="codes" rows="5" placeholder="600036,银行,核心持仓,低波;红利&#10;000001,银行&#10;002594,新能源车,比亚迪"></textarea>
+      <div class="import-actions">
+        <input name="group_name" type="text" maxlength="32" placeholder="默认分组（可空）">
+        <button class="btn btn-primary btn-sm" type="submit">导入</button>
+        <span class="field-hint">逗号分隔；重复代码自动跳过；标签用 ; 或 / 分隔</span>
+      </div>
+    </form>
+  </details>
 </section>
 
 {% if items %}
@@ -54,6 +82,7 @@
         <span class="badge badge-{{ item.rating_class }}">{{ item.rating }}</span>
         {% endif %}
         <span class="badge badge-source">{{ item.source }}</span>
+        <span class="badge badge-group">{{ item.group }}</span>
       </div>
     </div>
 
@@ -92,11 +121,25 @@
 
     <p class="watch-reason">{{ item.reason }}</p>
 
+    {% if item.watch_tags %}
+    <div class="tag-row">
+      {% for tag in item.watch_tags %}<span class="tag tag-watch">{{ tag }}</span>{% endfor %}
+    </div>
+    {% endif %}
     {% if item.tags %}
     <div class="tag-row">
       {% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
     </div>
     {% endif %}
+
+    <details class="watch-edit">
+      <summary>分组 / 标签</summary>
+      <form method="post" action="/watchlist/{{ item.id }}/update">
+        <input name="group_name" type="text" maxlength="32" value="{{ item.group }}" list="group-options">
+        <input name="tags" type="text" maxlength="120" value="{{ item.watch_tags | join(',') }}" placeholder="标签，逗号分隔">
+        <button class="btn btn-ghost btn-sm" type="submit">保存</button>
+      </form>
+    </details>
 
     <div class="watch-footer">
       <span class="muted">
@@ -116,8 +159,13 @@
 </section>
 {% else %}
 <section class="empty-state">
+  {% if count %}
+  <strong>没有匹配的自选股</strong>
+  <p>换个关键词或分组，或<a href="/watchlist">查看全部</a>。</p>
+  {% else %}
   <strong>自选股为空</strong>
   <p>在上方输入 6 位主板股票代码，把第一只股票加入观察列表。</p>
+  {% endif %}
 </section>
 {% endif %}
 {% endblock %}

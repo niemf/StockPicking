@@ -94,7 +94,36 @@ def init_db() -> None:
     from app.db import models  # noqa: F401 - registers the mappers
 
     Base.metadata.create_all(engine)
+    _ensure_columns()
     logger.info("database ready: {} ({})", engine.dialect.name, engine.url.database)
+
+
+# Columns added after the first release. ``create_all`` never alters existing
+# tables, so a fresh SQLite file would silently diverge from the models.
+_ADDED_COLUMNS: dict[str, dict[str, str]] = {
+    "watchlist": {
+        "group_name": "VARCHAR(32) DEFAULT '默认'",
+        "tags": "JSON",
+    },
+}
+
+
+def _ensure_columns(target: Engine | None = None) -> None:
+    from sqlalchemy import inspect
+
+    target = target or engine
+    inspector = inspect(target)
+    tables = set(inspector.get_table_names())
+    with target.begin() as connection:
+        for table, columns in _ADDED_COLUMNS.items():
+            if table not in tables:
+                continue
+            present = {column["name"] for column in inspector.get_columns(table)}
+            for name, ddl in columns.items():
+                if name in present:
+                    continue
+                connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
+                logger.info("schema migrated: {}.{}", table, name)
 
 
 def check_database() -> dict:

@@ -172,6 +172,8 @@ class Watchlist(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     status: Mapped[str] = mapped_column(String(16), default="active")  # active/archived
     note: Mapped[str | None] = mapped_column(Text, default=None)
+    group_name: Mapped[str] = mapped_column(String(32), default="默认")
+    tags: Mapped[list[str] | None] = mapped_column(JSON, default=None)
 
     plan: Mapped["TradePlan | None"] = relationship(foreign_keys=[plan_id], lazy="joined")
 

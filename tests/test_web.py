@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base, get_db
-from app.db.models import Holding, HoldingTransaction, Stock, Watchlist
+from app.db.models import AlertRule, Holding, HoldingTransaction, Stock, Watchlist
 from app.main import app
 
 
@@ -123,3 +123,67 @@ def test_holding_add_rejects_bad_share_lot(client) -> None:
     assert response.status_code == 303
     assert "error=" in _location(response)
     assert client.db.scalar(select(func.count()).select_from(Holding)) == 0
+
+
+def test_watchlist_import_export_and_inline_update(client) -> None:
+    imported = client.post(
+        "/watchlist/import",
+        data={"codes": "600036,银行,招行,低波;红利\n601988", "group_name": "自选"},
+    )
+    assert imported.status_code == 303
+    assert "ok=" in _location(imported)
+
+    rows = {row.code: row for row in client.db.scalars(select(Watchlist))}
+    assert rows["600036"].group_name == "银行"
+    assert rows["600036"].tags == ["低波", "红利"]
+    assert rows["601988"].group_name == "自选"
+
+    export = client.get("/watchlist/export.csv")
+    assert export.status_code == 200
+    text = export.content.decode("utf-8-sig")
+    assert "code,name,group,note,tags" in text
+    assert "600036,招商银行,银行,招行,低波;红利" in text
+
+    updated = client.post(
+        f"/watchlist/{rows['601988'].id}/update",
+        data={"group_name": "核心", "tags": "大金融", "note": "观察"},
+    )
+    assert updated.status_code == 303
+    refreshed = client.db.get(Watchlist, rows["601988"].id)
+    assert refreshed.group_name == "核心"
+    assert refreshed.tags == ["大金融"]
+    assert refreshed.note == "观察"
+
+
+def test_alerts_custom_rule_create_and_delete(client) -> None:
+    client.post("/watchlist/add", data={"code": "600036"})
+
+    created = client.post(
+        "/alerts/rules",
+        data={
+            "code": "600036",
+            "logic": "OR",
+            "metric_a": "pct_chg",
+            "op_a": ">=",
+            "value_a": "5",
+            "metric_b": "amount_yi",
+            "op_b": ">=",
+            "value_b": "2",
+            "channel": "both",
+            "max_per_day": "3",
+            "expires_on": "",
+        },
+    )
+    assert created.status_code == 303
+    assert "error=" not in _location(created)
+
+    rule = client.db.scalar(select(AlertRule).where(AlertRule.rule_type == "COMPOSITE"))
+    assert rule is not None
+    assert rule.params["logic"] == "OR"
+    assert rule.params["channel"] == "both"
+    assert rule.params["max_per_day"] == 3
+    assert len(rule.params["conditions"]) == 2
+
+    deleted = client.post(f"/alerts/rules/{rule.id}/delete")
+    assert deleted.status_code == 303
+    assert client.db.get(AlertRule, rule.id) is None

@@ -8,6 +8,7 @@ where the UI and the API disagree about validation rules.
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -125,9 +126,50 @@ def watch_items(session: Session) -> list[dict[str, Any]]:
                 "tags": (plan.tags if plan and plan.tags else []),
                 "has_plan": plan is not None,
                 "note": row.note,
+                "group": row.group_name or "默认",
+                "watch_tags": row.tags or [],
+                "search": _search_blob(row.code, row.name, row.group_name, row.tags, row.note),
             }
         )
     return items
+
+
+def _search_blob(
+    code: str,
+    name: str,
+    group: str | None = None,
+    tags: list[str] | None = None,
+    note: str | None = None,
+) -> str:
+    """Lower-cased haystack: code, name, full pinyin, initials, group, tags."""
+    parts = [code, name or "", group or "", note or ""]
+    parts.extend(tags or [])
+    if name:
+        try:
+            from pypinyin import Style, lazy_pinyin
+
+            parts.extend(lazy_pinyin(name))
+            parts.append("".join(lazy_pinyin(name)))
+            parts.append("".join(lazy_pinyin(name, style=Style.FIRST_LETTER)))
+        except Exception:  # noqa: BLE001 - search must work without pypinyin
+            pass
+    return " ".join(part.lower() for part in parts if part)
+
+
+def filter_watches(
+    items: list[dict[str, Any]],
+    *,
+    query: str | None = None,
+    group: str | None = None,
+) -> list[dict[str, Any]]:
+    result = items
+    if group and group != "全部":
+        result = [item for item in result if item.get("group") == group]
+    if query:
+        needle = query.strip().lower()
+        if needle:
+            result = [item for item in result if needle in item.get("search", "")]
+    return result
 
 
 def holding_items(session: Session) -> list[dict[str, Any]]:
@@ -184,13 +226,29 @@ def find_holding(session: Session, code: str) -> Holding | None:
 
 
 # --------------------------------------------------------------------- mutations
-def add_watch(session: Session, code: str, source: str = "manual", note: str | None = None) -> Watchlist:
+def add_watch(
+    session: Session,
+    code: str,
+    source: str = "manual",
+    note: str | None = None,
+    *,
+    group_name: str | None = None,
+    tags: list[str] | None = None,
+) -> Watchlist:
     value = _normalize(code)
     if find_watch(session, value) is not None:
         raise PortfolioError(f"{value} 已在自选列表中")
 
     stock = _ensure_stock(session, value)
-    row = Watchlist(code=value, name=stock.name, source=source, note=note, status="active")
+    row = Watchlist(
+        code=value,
+        name=stock.name,
+        source=source,
+        note=note,
+        status="active",
+        group_name=(group_name or "默认").strip()[:32] or "默认",
+        tags=[tag[:16] for tag in (tags or []) if str(tag).strip()][:8] or None,
+    )
     session.add(row)
     session.commit()
     return row
@@ -202,6 +260,88 @@ def remove_watch(session: Session, watch_id: int) -> None:
         raise PortfolioError("自选股不存在")
     session.delete(row)
     session.commit()
+
+
+def update_watch(
+    session: Session,
+    watch_id: int,
+    *,
+    group_name: str | None = None,
+    tags: list[str] | None = None,
+    note: str | None = None,
+) -> Watchlist:
+    row = session.get(Watchlist, watch_id)
+    if row is None:
+        raise PortfolioError("自选股不存在")
+    if group_name is not None:
+        row.group_name = group_name.strip()[:32] or "默认"
+    if tags is not None:
+        row.tags = [tag[:16] for tag in tags if str(tag).strip()][:8] or None
+    if note is not None:
+        row.note = note.strip()[:500] or None
+    session.commit()
+    return row
+
+
+_LINE_SPLIT = re.compile(r"[,，\t]")
+_TAG_SPLIT = re.compile(r"[;；/]")
+
+
+def import_watches(
+    session: Session,
+    text: str,
+    *,
+    default_group: str = "默认",
+) -> dict[str, Any]:
+    """Bulk import ``code,group,note,tags`` lines; duplicates are skipped."""
+    added: list[str] = []
+    skipped: list[str] = []
+    errors: list[dict[str, Any]] = []
+
+    for index, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [part.strip() for part in _LINE_SPLIT.split(line)]
+        code = parts[0]
+        try:
+            value = _normalize(code)
+        except PortfolioError as exc:
+            errors.append({"line": index, "value": code, "error": str(exc)})
+            continue
+        if find_watch(session, value) is not None:
+            skipped.append(value)
+            continue
+
+        group = parts[1] if len(parts) > 1 and parts[1] else default_group
+        note = parts[2] if len(parts) > 2 and parts[2] else None
+        tags = (
+            [tag.strip() for tag in _TAG_SPLIT.split(parts[3])]
+            if len(parts) > 3 and parts[3]
+            else []
+        )
+        try:
+            add_watch(session, value, group_name=group, note=note, tags=tags)
+            added.append(value)
+        except PortfolioError as exc:
+            errors.append({"line": index, "value": code, "error": str(exc)})
+
+    return {
+        "added": added,
+        "skipped": skipped,
+        "errors": errors,
+        "total": len(added) + len(skipped) + len(errors),
+    }
+
+
+def watch_groups(session: Session) -> list[str]:
+    rows = session.scalars(
+        select(Watchlist.group_name)
+        .where(Watchlist.status == "active")
+        .distinct()
+        .order_by(Watchlist.group_name)
+    )
+    return [row for row in rows if row] or ["默认"]
 
 
 def add_holding(

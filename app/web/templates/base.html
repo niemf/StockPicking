@@ -22,7 +22,7 @@
     <nav class="nav">
       <a href="/" class="{% if page == 'dashboard' %}active{% endif %}">仪表盘</a>
       <a href="/watchlist" class="{% if page == 'watchlist' %}active{% endif %}">自选股</a>
-      <a href="/holdings" class="{% if page == 'holdings' %}active{% endif %}">持仓</a>
+      {% if feature_holdings %}<a href="/holdings" class="{% if page == 'holdings' %}active{% endif %}">持仓</a>{% endif %}
       <a href="/candidates" class="{% if page == 'candidates' %}active{% endif %}">候选池</a>
       <a href="/plans" class="{% if page == 'plans' %}active{% endif %}">计划</a>
       <a href="/alerts" class="{% if page == 'alerts' %}active{% endif %}">预警</a>

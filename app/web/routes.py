@@ -7,11 +7,13 @@ live prices are overlaid from Tencent/Sina. Demo data is now only a seed source
 
 from __future__ import annotations
 
+import csv
+import io
 from datetime import date, datetime, time
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
@@ -29,15 +31,20 @@ from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
 from app.services.market_flow import get_lhb, get_sector_flow
 from app.services.notifier import condition_text
+from app.services.sentiment import market_sentiment
 from app.services.plans import confirm_plan, generate_plans, plan_items, reject_plan
 from app.services.portfolio import (
     PortfolioError,
     add_holding,
     add_watch,
+    filter_watches,
     holding_items,
+    import_watches,
     remove_holding,
     remove_watch,
     update_holding,
+    update_watch,
+    watch_groups,
     watch_items,
 )
 from app.services.quotes import QuoteService
@@ -70,6 +77,7 @@ router = APIRouter()
 
 
 def render(request: Request, name: str, context: dict):
+    context.setdefault("feature_holdings", settings.feature_holdings)
     return templates.TemplateResponse(request, name, context)
 
 
@@ -383,6 +391,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     holdings = _build_holdings(holding_rows, quotes)
     totals = _totals(holdings)
     indices = _build_indices()
+    sentiment = market_sentiment(db, quote_service=quote_service)
 
     allocation = [
         {"name": item["name"], "value": round(item["market_value"], 2)} for item in holdings
@@ -409,6 +418,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "page_title": "仪表盘",
             "regime": MARKET_REGIME,
             "indices": indices,
+            "sentiment": sentiment,
             "watchlist": watchlist[:4],
             "watchlist_total": len(watchlist),
             "ai_count": ai_count,
@@ -425,10 +435,16 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/watchlist")
-def watchlist(request: Request, db: Session = Depends(get_db)):
+def watchlist(
+    request: Request,
+    q: str | None = None,
+    group: str | None = None,
+    db: Session = Depends(get_db),
+):
     rows = watch_items(db)
     quotes = quote_service.get_quotes([row["code"] for row in rows]) if rows else {}
-    items = _build_watchlist(rows, quotes)
+    all_items = _build_watchlist(rows, quotes)
+    items = filter_watches(all_items, query=q, group=group)
     in_zone = sum(1 for item in items if item["zone_status"] == "进入建仓区")
     ai_count = sum(1 for item in items if item["source"] == "AI 候选")
     return render(
@@ -438,7 +454,11 @@ def watchlist(request: Request, db: Session = Depends(get_db)):
             "page": "watchlist",
             "page_title": "自选股",
             "items": items,
-            "count": len(items),
+            "count": len(all_items),
+            "filtered": len(items),
+            "groups": watch_groups(db),
+            "group": group or "全部",
+            "query": q or "",
             "in_zone": in_zone,
             "ai_count": ai_count,
             "error": request.query_params.get("error"),
@@ -452,13 +472,83 @@ def watchlist(request: Request, db: Session = Depends(get_db)):
 def watchlist_add(
     code: str = Form(...),
     note: str | None = Form(default=None),
+    group_name: str | None = Form(default=None),
+    tags: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ):
     try:
-        row = add_watch(db, code, source="manual", note=note or None)
+        row = add_watch(
+            db,
+            code,
+            source="manual",
+            note=note or None,
+            group_name=group_name,
+            tags=[tag for tag in (tags or "").replace("，", ",").split(",") if tag.strip()],
+        )
     except PortfolioError as exc:
         return _redirect("/watchlist", error=str(exc))
     return _redirect("/watchlist", ok=f"已添加 {row.name}（{row.code}）")
+
+
+@router.post("/watchlist/import")
+def watchlist_import(
+    codes: str = Form(...),
+    group_name: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    result = import_watches(db, codes, default_group=(group_name or "默认"))
+    if not result["total"]:
+        return _redirect("/watchlist", error="没有可导入的内容")
+    message = f"导入完成：新增 {len(result['added'])} 只，跳过重复 {len(result['skipped'])} 只"
+    if result["errors"]:
+        first = result["errors"][0]
+        message += f"，失败 {len(result['errors'])} 行（第 {first['line']} 行：{first['error']}）"
+    return _redirect("/watchlist", ok=message)
+
+
+@router.get("/watchlist/export.csv")
+def watchlist_export(db: Session = Depends(get_db)):
+    rows = watch_items(db)
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(["code", "name", "group", "note", "tags"])
+    for row in rows:
+        writer.writerow(
+            [
+                row["code"],
+                row["name"],
+                row.get("group") or "默认",
+                (row.get("note") or "").replace("\n", " "),
+                ";".join(row.get("watch_tags") or []),
+            ]
+        )
+    content = "\ufeff" + buffer.getvalue()
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="watchlist.csv"'},
+    )
+
+
+@router.post("/watchlist/{watch_id}/update")
+def watchlist_update(
+    watch_id: int,
+    group_name: str | None = Form(default=None),
+    tags: str | None = Form(default=None),
+    note: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        update_watch(
+            db,
+            watch_id,
+            group_name=group_name,
+            tags=[tag for tag in (tags or "").replace("，", ",").split(",") if tag.strip()],
+            note=note,
+        )
+    except PortfolioError as exc:
+        return _redirect("/watchlist", error=str(exc))
+    return _redirect("/watchlist", ok="已更新分组")
 
 
 @router.post("/watchlist/{watch_id}/delete")
@@ -871,8 +961,57 @@ def alerts_page(request: Request, db: Session = Depends(get_db)):
             "status": status,
             "monitor": monitor_service.monitor_status(),
             "regime": MARKET_REGIME,
+            "rules": alert_service.list_custom_rules(db),
+            "metrics": alert_service.RULE_METRICS,
+            "ops": alert_service.RULE_OPS,
+            "channels": alert_service.RULE_CHANNELS,
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
         },
     )
+
+
+@router.post("/alerts/rules")
+def alerts_rule_create(
+    code: str = Form(...),
+    logic: str = Form(default="AND"),
+    metric_a: str = Form(default="price"),
+    op_a: str = Form(default=">="),
+    value_a: str = Form(...),
+    metric_b: str | None = Form(default=None),
+    op_b: str = Form(default=">="),
+    value_b: str | None = Form(default=None),
+    channel: str = Form(default="feishu"),
+    max_per_day: int = Form(default=5),
+    expires_on: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    raw = [
+        {"metric": metric_a, "op": op_a, "value": value_a},
+        {"metric": metric_b, "op": op_b, "value": value_b},
+    ]
+    conditions = [item for item in raw if item["metric"] and str(item["value"]).strip()]
+    try:
+        expiry = date.fromisoformat(expires_on) if expires_on else None
+        alert_service.upsert_custom_rule(
+            db,
+            code.strip(),
+            conditions,
+            logic=logic,
+            channel=channel,
+            max_per_day=max_per_day,
+            expires_on=expiry,
+        )
+    except (ValueError, PortfolioError) as exc:
+        return _redirect("/alerts", error=str(exc))
+    return _redirect("/alerts", ok=f"已保存 {code.strip()} 的自定义预警")
+
+
+@router.post("/alerts/rules/{rule_id}/delete")
+def alerts_rule_delete(rule_id: int, db: Session = Depends(get_db)):
+    if not alert_service.delete_custom_rule(db, rule_id):
+        return _redirect("/alerts", error="规则不存在")
+    return _redirect("/alerts", ok="已删除自定义预警")
 
 
 # ------------------------------------------------------------------ api
@@ -945,6 +1084,11 @@ def api_sector_flow(refresh: bool = False):
 @router.get("/api/market/lhb")
 def api_lhb(refresh: bool = False):
     return get_lhb(None, refresh=refresh)
+
+
+@router.get("/api/market/sentiment")
+def api_market_sentiment(refresh: bool = False, db: Session = Depends(get_db)):
+    return market_sentiment(db, refresh=refresh, quote_service=quote_service)
 
 
 @router.post("/api/ai/plans/generate")
