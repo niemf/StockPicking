@@ -210,6 +210,12 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
                 "verdict": "看多",
                 "verdict_class": "up",
                 "strength": 80,
+                "macd_hist": 0.12,
+                "key_signals": [
+                    {"label": "站上 MA20", "detail": "+1.4%", "weight": 2},
+                    {"label": "MA20 向上", "detail": "+0.6%", "weight": 2},
+                    {"label": "接近压力位", "detail": "距压力 2.1%", "weight": -1},
+                ],
                 "bullish": [{"label": "站上 MA20", "detail": "+1.4%", "weight": 2}],
                 "bearish": [{"label": "接近压力位", "detail": "距压力 2.1%", "weight": -1}],
                 "summary": "现价 43.10；均线多头排列；综合评分 +6 → 看多。",
@@ -236,7 +242,7 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
     assert "看多" in response.text
     assert "评分 +6" in response.text
     assert "多头排列" in response.text
-    assert "MA30" in response.text
+    assert "MA20" in response.text
     assert "支撑" in response.text and "压力" in response.text
     assert "密集区" in response.text
     assert "AI 研报卡：看多" in response.text

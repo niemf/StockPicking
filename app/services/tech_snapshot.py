@@ -344,6 +344,7 @@ def build_snapshot(
 
     score, bullish, bearish = _score(facts)
     verdict, verdict_class, strength = _verdict(score)
+    key_signals = sorted(bullish + bearish, key=lambda item: abs(item["weight"]), reverse=True)[:3]
     facts.update(
         {
             "score": score,
@@ -353,6 +354,7 @@ def build_snapshot(
             "bullish": bullish,
             "bearish": bearish,
             "signals": bullish + bearish,
+            "key_signals": key_signals,
         }
     )
     facts["summary"] = _summary(facts)

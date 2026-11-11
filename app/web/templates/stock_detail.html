@@ -112,10 +112,17 @@
 
 {% if analysis and analysis.available %}
 <section class="panel verdict-panel {{ analysis.verdict_class }}" id="diagnosis">
+  <div class="panel-head">
+    <div>
+      <h2>技术诊断</h2>
+      <p>均线 / 量价 / 动量，程序计算 · 截至 {{ analysis.last_bar }}</p>
+    </div>
+    <span class="badge badge-source">零 AI</span>
+  </div>
   <div class="verdict-head">
     <span class="verdict-badge">{{ analysis.verdict }}</span>
     <span class="verdict-score">评分 {{ '%+d' | format(analysis.score) }} · {{ analysis.trend }}</span>
-    <span class="verdict-strength">置信度 {{ analysis.strength }}% · 数据截至 {{ analysis.last_bar }}</span>
+    <span class="verdict-strength">置信度 {{ analysis.strength }}%</span>
   </div>
   <p class="verdict-summary">{{ analysis.summary }}</p>
   <div class="signal-cols">

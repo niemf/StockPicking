@@ -83,6 +83,7 @@ def test_build_snapshot_levels_and_trend() -> None:
     assert snapshot["verdict"] == "看多"
     assert snapshot["score"] > 0
     assert snapshot["bullish"]
+    assert len(snapshot["key_signals"]) <= 3
     assert "综合评分" in snapshot["summary"]
 
 
