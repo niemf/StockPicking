@@ -53,12 +53,13 @@ def _ma20(df: pd.DataFrame) -> dict[str, pd.Series]:
     return {"ma20": df["close"].rolling(20).mean()}
 
 
-@feature_builder("ma_other", provides=("ma5", "ma10", "ma60"))
+@feature_builder("ma_other", provides=("ma5", "ma10", "ma30", "ma60"))
 def _ma_other(df: pd.DataFrame) -> dict[str, pd.Series]:
     close = df["close"]
     return {
         "ma5": close.rolling(5).mean(),
         "ma10": close.rolling(10).mean(),
+        "ma30": close.rolling(30).mean(),
         "ma60": close.rolling(60).mean(),
     }
 

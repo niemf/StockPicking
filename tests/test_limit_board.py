@@ -105,6 +105,40 @@ def test_get_lhb_seats_payload_and_cache() -> None:
     assert limit_board.get_lhb_seats(DAY, provider=Broken(), limit=1)["count"] == 2
 
 
+def test_ladder_handles_six_plus_boards() -> None:
+    frame = pool_frame()
+    extra = frame.iloc[[0]].copy()
+    extra["代码"] = "600001"
+    extra["名称"] = "六板样本"
+    extra["连板数"] = 6
+    extra["封板资金"] = 1.0e9
+    rows = limit_board.parse_pool(pd.concat([frame, extra], ignore_index=True))
+
+    ladder = limit_board._ladder(rows)
+    labels = [group["label"] for group in ladder]
+    assert labels[0] == "6 板"
+    assert labels[-1] == "首板"
+    assert ladder[0]["count"] == 1
+
+
+def test_expired_cache_is_refetched() -> None:
+    import json
+
+    limit_board.get_limit_pool(DAY, provider=FakeProvider(), refresh=True)
+    path = limit_board._cache_path("limit_pool", DAY)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["fetched_ts"] = 0
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+    class OneRow(FakeProvider):
+        def get_limit_pool(self, day):
+            return pool_frame().head(1)
+
+    refreshed = limit_board.get_limit_pool(DAY, provider=OneRow())
+    assert refreshed["total"] == 1
+    assert not refreshed.get("stale")
+
+
 def test_nan_values_do_not_break_json() -> None:
     import json
 

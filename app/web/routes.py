@@ -51,8 +51,15 @@ from app.services.portfolio import (
     watch_items,
 )
 from app.services.quotes import QuoteService
-from app.services.report_card import generate_report, latest_report, recent_cards, report_dict
+from app.services.report_card import (
+    generate_report,
+    latest_report,
+    latest_reports_for,
+    recent_cards,
+    report_dict,
+)
 from app.services.review import generate_review, recent_reports
+from app.services.tech_snapshot import snapshot_many
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -448,6 +455,12 @@ def watchlist(
     rows = watch_items(db)
     quotes = quote_service.get_quotes([row["code"] for row in rows]) if rows else {}
     all_items = _build_watchlist(rows, quotes)
+    codes = [item["code"] for item in all_items]
+    tech = snapshot_many(db, codes, quotes)
+    cards = latest_reports_for(db, codes)
+    for item in all_items:
+        item["tech"] = tech.get(item["code"])
+        item["report_card"] = cards.get(item["code"])
     items = filter_watches(all_items, query=q, group=group)
     in_zone = sum(1 for item in items if item["zone_status"] == "进入建仓区")
     ai_count = sum(1 for item in items if item["source"] == "AI 候选")
@@ -465,10 +478,32 @@ def watchlist(
             "query": q or "",
             "in_zone": in_zone,
             "ai_count": ai_count,
+            "analyzed": sum(1 for item in all_items if item.get("report_card")),
             "error": request.query_params.get("error"),
             "notice": request.query_params.get("ok"),
             "regime": MARKET_REGIME,
         },
+    )
+
+
+@router.post("/watchlist/{code}/analyze")
+def watchlist_analyze(
+    code: str,
+    refresh: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+
+    try:
+        value = normalize_code(code)
+        row, cached, _, log = generate_report(db, value, force=refresh == "1")
+    except (ValueError, AIError) as exc:
+        return _redirect("/watchlist", error=str(exc))
+    if cached:
+        return _redirect("/watchlist", ok=f"{value} 今日已有研报卡，未重复调用 AI")
+    return _redirect(
+        "/watchlist",
+        ok=f"{value} 研报卡已生成：{row.conclusion} · {row.score} 分（¥{log.cost:.4f}）",
     )
 
 

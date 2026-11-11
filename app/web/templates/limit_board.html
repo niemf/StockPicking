@@ -11,7 +11,7 @@
     </p>
   </div>
   <div class="page-head-actions">
-    <a class="btn btn-ghost" href="/limit-board?refresh=true">刷新（首次约 10 秒）</a>
+    <a class="btn btn-ghost" href="/limit-board?refresh=true">刷新（首次约 15 秒）</a>
     <a class="btn btn-primary" href="/sectors">看板块资金</a>
   </div>
 </section>
@@ -19,25 +19,29 @@
 {% if pool.stale %}<div class="flash flash-error">涨停池接口暂时不可用，展示最近一次成功缓存。</div>{% endif %}
 
 {% if pool.available %}
-<section class="ladder-grid">
+<section class="ladder-list">
   {% for group in pool.ladder %}
-  <section class="panel ladder-col">
-    <div class="panel-head">
-      <div>
-        <h2>{{ group.label }}</h2>
-        <p>{{ group.count }} 只</p>
-      </div>
+  <article class="ladder-row">
+    <div class="ladder-rail {{ 'hot' if group.streak >= 3 }}">
+      <strong>{{ group.label }}</strong>
+      <span>{{ group.count }} 只</span>
     </div>
-    <div class="stock-chips">
+    <div class="ladder-stocks">
       {% for item in group.stocks %}
-      <a class="stock-chip" href="/stock/{{ item.code }}">
-        <strong>{{ item.name }}</strong>
-        <small>{{ item.code }} · {{ item.industry }}</small>
-        <span>封 {{ item.seal_yi | money }} 亿{% if item.breaks %} · 炸 {{ item.breaks }} 次{% endif %}</span>
+      <a class="limit-card {{ 'hot' if group.streak >= 3 }}" href="/stock/{{ item.code }}">
+        <div class="limit-card-head">
+          <strong>{{ item.name }}</strong>
+          <span class="limit-code">{{ item.code }}</span>
+        </div>
+        <div class="limit-card-meta">{{ item.industry }}</div>
+        <div class="limit-card-foot">
+          <span>封 {{ item.seal_yi | money }} 亿</span>
+          <span class="muted">{{ item.first_seal }}{% if item.breaks %} · 炸 {{ item.breaks }}{% endif %}</span>
+        </div>
       </a>
       {% endfor %}
     </div>
-  </section>
+  </article>
   {% endfor %}
 </section>
 
@@ -124,7 +128,7 @@
 </section>
 
 <section class="data-note">
-  涨停池与席位来自东方财富（push2ex / datacenter），按日缓存：首次约 10 秒，之后直接读缓存。连板高度以接口的“连板数”为准；数据仅供观察，不构成投资建议。
+  涨停池与席位来自东方财富（push2ex / datacenter），按日缓存：首次约 15 秒，之后直接读缓存。连板高度以接口的“连板数”为准；数据仅供观察，不构成投资建议。
 </section>
 {% endblock %}
 

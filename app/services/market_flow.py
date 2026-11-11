@@ -54,16 +54,19 @@ def _cache_path(kind: str, day: date) -> Path:
 
 
 def _read_cache(kind: str, day: date, ttl: int) -> dict | None:
+    """Return the cached payload only while it is fresh.
+
+    Expired entries return ``None`` so callers refetch; the failure paths read
+    with a long TTL and mark the result ``stale`` themselves.
+    """
     path = _cache_path(kind, day)
     if not path.exists():
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        age = time.time() - float(payload.get("fetched_ts", 0))
-        if age <= ttl:
+        if time.time() - float(payload.get("fetched_ts", 0)) <= ttl:
             return payload
-        payload["stale"] = True
-        return payload
+        return None
     except Exception:  # noqa: BLE001 - a corrupt cache must not break the review
         return None
 

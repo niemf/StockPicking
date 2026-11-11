@@ -155,6 +155,112 @@ def test_watchlist_import_export_and_inline_update(client) -> None:
     assert refreshed.note == "观察"
 
 
+def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> None:
+    from app.providers.base import Quote
+
+    client.post("/watchlist/add", data={"code": "600036"})
+
+    quote = Quote(
+        code="600036",
+        name="招商银行",
+        price=43.1,
+        pre_close=43.0,
+        open=43.0,
+        high=43.3,
+        low=42.8,
+        volume=1e6,
+        amount=4e8,
+        pct_chg=0.2,
+        change=0.1,
+        source="test",
+    )
+    monkeypatch.setattr(
+        "app.web.routes.quote_service.get_quotes", lambda codes: {"600036": quote}
+    )
+    monkeypatch.setattr(
+        "app.web.routes.snapshot_many",
+        lambda db, codes, quotes=None: {
+            "600036": {
+                "available": True,
+                "code": "600036",
+                "price": 43.1,
+                "pct_chg": 0.2,
+                "ma5": 43.2,
+                "ma10": 43.0,
+                "ma20": 42.5,
+                "ma30": 41.8,
+                "ma60": 40.9,
+                "ma20_dist": 1.4,
+                "trend": "多头排列",
+                "trend_class": "up",
+                "volume_ratio": 1.32,
+                "volume_state": "量能正常",
+                "support": 42.2,
+                "resistance": 44.0,
+                "support_dist": 2.1,
+                "resistance_dist": 2.1,
+                "dense_low": 42.8,
+                "dense_high": 43.6,
+                "summary": "均线多头排列；支撑 42.20 / 压力 44.00",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        "app.web.routes.latest_reports_for",
+        lambda db, codes: {
+            "600036": {
+                "code": "600036",
+                "badge": "success",
+                "conclusion": "看多",
+                "score": 72,
+                "score_label": "偏强",
+                "trade_date": "2026-11-11",
+                "summary": "站上 MA20，量能温和，注意 44 附近压力。",
+            }
+        },
+    )
+
+    response = client.get("/watchlist")
+    assert response.status_code == 200
+    assert "多头排列" in response.text
+    assert "MA30" in response.text
+    assert "支撑" in response.text and "压力" in response.text
+    assert "密集区" in response.text
+    assert "看多 · 72 分" in response.text
+    assert "站上 MA20" in response.text
+    assert "重新生成" in response.text
+
+
+def test_watchlist_analyze_endpoint(client, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    client.post("/watchlist/add", data={"code": "600036"})
+
+    fake_row = SimpleNamespace(conclusion="看多", score=70)
+    fake_log = SimpleNamespace(cost=0.0049)
+    calls: list[dict] = []
+
+    def fake_generate(db, code, **kwargs):
+        calls.append(kwargs)
+        return fake_row, False, [], fake_log
+
+    monkeypatch.setattr("app.web.routes.generate_report", fake_generate)
+
+    response = client.post("/watchlist/600036/analyze", data={"refresh": "1"})
+    assert response.status_code == 303
+    location = response.headers["location"]
+    assert "ok=" in location and "70" in location
+    assert calls[0]["force"] is True
+
+    monkeypatch.setattr(
+        "app.web.routes.generate_report",
+        lambda db, code, **kwargs: (fake_row, True, [], None),
+    )
+    cached = client.post("/watchlist/600036/analyze")
+    assert cached.status_code == 303
+    assert "ok=" in cached.headers["location"]
+
+
 def test_alerts_custom_rule_create_and_delete(client) -> None:
     client.post("/watchlist/add", data={"code": "600036"})
 

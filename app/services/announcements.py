@@ -53,6 +53,7 @@ def _cache_path(code: str, day: date) -> Path:
 
 
 def _read_cache(code: str, day: date, ttl: int) -> dict | None:
+    """Fresh payload only; the failure path reads a long TTL and marks stale."""
     path = _cache_path(code, day)
     if not path.exists():
         return None
@@ -60,8 +61,7 @@ def _read_cache(code: str, day: date, ttl: int) -> dict | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if time.time() - float(payload.get("fetched_ts", 0)) <= ttl:
             return payload
-        payload["stale"] = True
-        return payload
+        return None
     except Exception:  # noqa: BLE001 - corrupt cache must not break the page
         return None
 

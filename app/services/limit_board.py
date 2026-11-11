@@ -31,14 +31,6 @@ POOL_TTL_INTRADAY = 600
 POOL_TTL_CLOSED = 6 * 3600
 SEAT_TTL = 6 * 3600
 
-BUCKETS: tuple[tuple[int, str], ...] = (
-    (5, "5 板及以上"),
-    (4, "4 板"),
-    (3, "3 板"),
-    (2, "2 板"),
-    (1, "首板"),
-)
-
 
 def _yi(value: Any, digits: int = 2) -> float | None:
     try:
@@ -56,6 +48,7 @@ def _cache_path(kind: str, day: date) -> Path:
 
 
 def _read_cache(kind: str, day: date, ttl: int) -> dict | None:
+    """Fresh payload only; failure paths read a long TTL and mark it stale."""
     path = _cache_path(kind, day)
     if not path.exists():
         return None
@@ -63,8 +56,7 @@ def _read_cache(kind: str, day: date, ttl: int) -> dict | None:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if time.time() - float(payload.get("fetched_ts", 0)) <= ttl:
             return payload
-        payload["stale"] = True
-        return payload
+        return None
     except Exception:  # noqa: BLE001
         return None
 
@@ -142,13 +134,14 @@ def parse_pool(df: pd.DataFrame) -> list[dict[str, Any]]:
 
 
 def _ladder(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Group by the actual streak, highest first (handles 5/6/7+ boards)."""
     groups: list[dict[str, Any]] = []
-    for streak, label in BUCKETS:
-        members = [item for item in rows if item["streak"] == streak] if streak < 5 else [
-            item for item in rows if item["streak"] >= 5
-        ]
-        if members:
-            groups.append({"streak": streak, "label": label, "count": len(members), "stocks": members})
+    for streak in sorted({item["streak"] for item in rows}, reverse=True):
+        members = [item for item in rows if item["streak"] == streak]
+        label = "首板" if streak == 1 else f"{streak} 板"
+        groups.append(
+            {"streak": streak, "label": label, "count": len(members), "stocks": members}
+        )
     return groups
 
 

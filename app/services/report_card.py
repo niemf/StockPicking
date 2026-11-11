@@ -464,6 +464,22 @@ def recent_cards(session: Session, limit: int = 20) -> list[dict[str, Any]]:
     return [report_dict(row) for row in rows]
 
 
+def latest_reports_for(session: Session, codes: list[str]) -> dict[str, dict[str, Any]]:
+    """Latest report card per code, for the watchlist cards."""
+    if not codes:
+        return {}
+    rows = session.scalars(
+        select(StockReport)
+        .where(StockReport.code.in_(codes))
+        .order_by(StockReport.created_at.desc())
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if row.code not in result:
+            result[row.code] = report_dict(row)
+    return result
+
+
 __all__ = [
     "CONCLUSIONS",
     "REPORT_SYSTEM_PROMPT",
@@ -472,6 +488,7 @@ __all__ = [
     "find_cached_report",
     "generate_report",
     "latest_report",
+    "latest_reports_for",
     "recent_cards",
     "report_dict",
     "score_label",
