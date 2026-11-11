@@ -30,6 +30,7 @@ from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
+from app.services.limit_board import get_lhb_seats, get_limit_pool
 from app.services.market_flow import get_lhb, get_sector_flow, get_stock_fund_flow
 from app.services.notifier import condition_text
 from app.services.sentiment import market_sentiment
@@ -775,6 +776,32 @@ def stock_report_generate(
     return _redirect(f"/stock/{code}", ok=f"已生成研报卡：{row.conclusion} · {row.score} 分")
 
 
+@router.get("/limit-board")
+def limit_board_page(
+    request: Request,
+    day: str | None = None,
+    refresh: bool = False,
+):
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError:
+        target = None
+    pool = get_limit_pool(target, refresh=refresh)
+    seats = get_lhb_seats(target, refresh=False)
+    return render(
+        request,
+        "limit_board.html",
+        {
+            "page": "limit",
+            "page_title": "涨停梯队",
+            "pool": pool,
+            "seats": seats,
+            "regime": MARKET_REGIME,
+            "notice": request.query_params.get("ok"),
+        },
+    )
+
+
 @router.get("/sectors")
 def sectors_page(request: Request, refresh: bool = False):
     flow = get_sector_flow(None, refresh=refresh)
@@ -1162,6 +1189,24 @@ def api_ai_usage(db: Session = Depends(get_db)):
 @router.get("/api/market/sector-flow")
 def api_sector_flow(refresh: bool = False):
     return get_sector_flow(None, refresh=refresh)
+
+
+@router.get("/api/limit-board")
+def api_limit_board(day: str | None = None, refresh: bool = False):
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期格式应为 YYYY-MM-DD") from exc
+    return get_limit_pool(target, refresh=refresh)
+
+
+@router.get("/api/lhb-seats")
+def api_lhb_seats(day: str | None = None, refresh: bool = False):
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期格式应为 YYYY-MM-DD") from exc
+    return get_lhb_seats(target, refresh=refresh)
 
 
 @router.get("/api/market/lhb")

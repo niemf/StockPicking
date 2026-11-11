@@ -218,6 +218,87 @@ def test_premarket_page_renders(client) -> None:
     assert "纪律提醒" in response.text
 
 
+def test_limit_board_page_renders(client, monkeypatch) -> None:
+    pool = {
+        "date": "2026-11-11",
+        "available": True,
+        "total": 2,
+        "max_streak": 3,
+        "first_boards": 1,
+        "ladder": [
+            {
+                "streak": 3,
+                "label": "3 板",
+                "count": 1,
+                "stocks": [
+                    {
+                        "code": "603366",
+                        "name": "日出东方",
+                        "industry": "厨卫电器",
+                        "seal_yi": 7.8,
+                        "breaks": 0,
+                        "streak": 3,
+                    }
+                ],
+            }
+        ],
+        "stocks": [
+            {
+                "code": "603366",
+                "name": "日出东方",
+                "industry": "厨卫电器",
+                "pct_chg": 10.01,
+                "seal_yi": 7.8,
+                "first_seal": "09:25:01",
+                "breaks": 0,
+                "stat": "3/3",
+                "streak": 3,
+            }
+        ],
+    }
+    seats = {
+        "date": "2026-11-10",
+        "available": True,
+        "count": 1,
+        "buy": [
+            {
+                "seat": "沪股通专用",
+                "net_yi": 16.0,
+                "buy_yi": 53.0,
+                "sell_yi": 37.0,
+                "stocks": ["金健米业"],
+            }
+        ],
+        "sell": [],
+    }
+    monkeypatch.setattr("app.web.routes.get_limit_pool", lambda *args, **kwargs: pool)
+    monkeypatch.setattr("app.web.routes.get_lhb_seats", lambda *args, **kwargs: seats)
+
+    response = client.get("/limit-board")
+    assert response.status_code == 200
+    assert "涨停梯队" in response.text
+    assert "日出东方" in response.text
+    assert "09:25:01" in response.text
+    assert "沪股通专用" in response.text
+    assert "龙虎榜活跃席位" in response.text
+
+
+def test_limit_board_page_handles_unavailable(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.web.routes.get_limit_pool",
+        lambda *args, **kwargs: {"date": "2026-11-11", "available": False, "error": "限流", "stocks": []},
+    )
+    monkeypatch.setattr(
+        "app.web.routes.get_lhb_seats",
+        lambda *args, **kwargs: {"available": False, "error": "限流", "buy": [], "sell": []},
+    )
+
+    response = client.get("/limit-board")
+    assert response.status_code == 200
+    assert "涨停池暂不可用" in response.text
+    assert "限流" in response.text
+
+
 def test_stock_detail_renders_report_panel(client, monkeypatch) -> None:
     from app.providers.base import Quote
 

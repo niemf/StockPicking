@@ -26,6 +26,7 @@ from app.providers.base import is_main_board  # noqa: E402
 from app.services.bars import bars_from_snapshot, incremental_bars  # noqa: E402
 from app.services.calendar import is_trading_day, market_session  # noqa: E402
 from app.services.discovery import run_discovery  # noqa: E402
+from app.services.limit_board import get_lhb_seats, get_limit_pool  # noqa: E402
 from app.services.quotes import QuoteService  # noqa: E402
 from app.services.universe import sync_universe  # noqa: E402
 
@@ -85,6 +86,17 @@ def main() -> int:
         )
         for item in output["candidates"][:10]:
             print(f"  {item['rank']:>2}. {item['code']} {item['name']} {item['score']:.1f}")
+
+        # Warm the pages that are expensive on first view (~15 s combined).
+        try:
+            pool = get_limit_pool(target, refresh=True)
+            seats = get_lhb_seats(target, refresh=True)
+            print(
+                f"涨停池预热：{pool.get('total') or 0} 只，高度 {pool.get('max_streak') or 0}；"
+                f"龙虎榜席位 {seats.get('count') or 0} 个"
+            )
+        except Exception as exc:  # noqa: BLE001 - warming must not fail the job
+            print(f"涨停池预热失败：{exc}")
 
     return 0
 

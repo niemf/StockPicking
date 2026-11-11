@@ -298,6 +298,19 @@ class AkShareProvider:
             return pd.DataFrame()
         return df.tail(days).reset_index(drop=True)
 
+    # ------------------------------------------------------------------ limit-up / seats
+    def get_limit_pool(self, day: date) -> pd.DataFrame:
+        """Limit-up pool for one trading day (code, streak, seal time, industry)."""
+        ak = _ak()
+        return ak.stock_zt_pool_em(date=day.strftime("%Y%m%d"))
+
+    def get_lhb_seats(self, start: date, end: date) -> pd.DataFrame:
+        """Active Dragon-Tiger trading seats (营业部) between two dates."""
+        ak = _ak()
+        return ak.stock_lhb_hyyyb_em(
+            start_date=start.strftime("%Y%m%d"), end_date=end.strftime("%Y%m%d")
+        )
+
     # ------------------------------------------------------------------ calendar
     def get_trade_calendar(self, start: date | None = None, end: date | None = None) -> list[date]:
         ak = _ak()

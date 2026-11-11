@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">LIMIT-UP</p>
+    <h1>涨停梯队</h1>
+    <p class="subtitle">
+      {{ pool.date }}{% if pool.fetched_at %} · 缓存于 {{ pool.fetched_at[11:16] }}{% endif %} ·
+      涨停 {{ pool.total or 0 }} 只 · 高度 {{ pool.max_streak or 0 }} 板 · 首板 {{ pool.first_boards or 0 }} 只
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn btn-ghost" href="/limit-board?refresh=true">刷新（首次约 10 秒）</a>
+    <a class="btn btn-primary" href="/sectors">看板块资金</a>
+  </div>
+</section>
+
+{% if pool.stale %}<div class="flash flash-error">涨停池接口暂时不可用，展示最近一次成功缓存。</div>{% endif %}
+
+{% if pool.available %}
+<section class="ladder-grid">
+  {% for group in pool.ladder %}
+  <section class="panel ladder-col">
+    <div class="panel-head">
+      <div>
+        <h2>{{ group.label }}</h2>
+        <p>{{ group.count }} 只</p>
+      </div>
+    </div>
+    <div class="stock-chips">
+      {% for item in group.stocks %}
+      <a class="stock-chip" href="/stock/{{ item.code }}">
+        <strong>{{ item.name }}</strong>
+        <small>{{ item.code }} · {{ item.industry }}</small>
+        <span>封 {{ item.seal_yi | money }} 亿{% if item.breaks %} · 炸 {{ item.breaks }} 次{% endif %}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>全部涨停（{{ pool.stocks | length }}）</h2>
+      <p>按连板高度、封板资金排序</p>
+    </div>
+    <input id="limit-filter" class="table-filter" type="search" placeholder="筛选名称 / 代码 / 行业">
+  </div>
+  <div class="table-wrap">
+    <table class="data-table" id="limit-table">
+      <thead>
+        <tr><th>连板</th><th>股票</th><th>行业</th><th>涨跌幅</th><th>封板资金</th><th>首封</th><th>炸板</th><th>涨停统计</th></tr>
+      </thead>
+      <tbody>
+        {% for item in pool.stocks %}
+        <tr>
+          <td><span class="badge badge-{{ 'danger' if item.streak >= 3 else ('warning' if item.streak == 2 else 'source') }}">{{ item.streak }} 板</span></td>
+          <td><a class="stock-cell" href="/stock/{{ item.code }}"><strong>{{ item.name }}</strong><small>{{ item.code }}</small></a></td>
+          <td class="muted">{{ item.industry }}</td>
+          <td class="up">{{ item.pct_chg | pct }}</td>
+          <td>{{ item.seal_yi | money }} 亿</td>
+          <td class="muted">{{ item.first_seal }}</td>
+          <td class="{{ 'down' if item.breaks else 'muted' }}">{{ item.breaks }}</td>
+          <td class="muted">{{ item.stat or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<section class="empty-state">
+  <strong>涨停池暂不可用</strong>
+  <p>{% if pool.error %}{{ pool.error }}{% else %}可能今天不是交易日，或接口正在限流。稍后重试。{% endif %}</p>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>龙虎榜活跃席位</h2>
+      <p>
+        {% if seats.available %}
+        {{ seats.date }} · 共 {{ seats.count }} 个席位 · 按净买卖额排序{% if seats.stale %}（缓存）{% endif %}
+        {% else %}
+        席位数据暂不可用
+        {% endif %}
+      </p>
+    </div>
+    <span class="badge badge-source">营业部</span>
+  </div>
+
+  {% if seats.available %}
+  <div class="seat-columns">
+    <div>
+      <h4 class="up">净买入靠前</h4>
+      <ul class="seat-list">
+        {% for seat in seats.buy %}
+        <li>
+          <div class="seat-head"><strong>{{ seat.seat }}</strong><span class="up">{{ seat.net_yi | money }} 亿</span></div>
+          <small class="muted">买 {{ seat.buy_yi | money }} 亿 · 卖 {{ seat.sell_yi | money }} 亿{% if seat.stocks %} · {{ seat.stocks | join('、') }}{% endif %}</small>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div>
+      <h4 class="down">净卖出靠前</h4>
+      <ul class="seat-list">
+        {% for seat in seats.sell %}
+        <li>
+          <div class="seat-head"><strong>{{ seat.seat }}</strong><span class="down">{{ seat.net_yi | money }} 亿</span></div>
+          <small class="muted">买 {{ seat.buy_yi | money }} 亿 · 卖 {{ seat.sell_yi | money }} 亿{% if seat.stocks %} · {{ seat.stocks | join('、') }}{% endif %}</small>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  {% elif seats.error %}
+  <p class="muted empty-note">{{ seats.error }}</p>
+  {% endif %}
+</section>
+
+<section class="data-note">
+  涨停池与席位来自东方财富（push2ex / datacenter），按日缓存：首次约 10 秒，之后直接读缓存。连板高度以接口的“连板数”为准；数据仅供观察，不构成投资建议。
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const filter = document.getElementById('limit-filter');
+  if (filter) {
+    filter.addEventListener('input', () => {
+      const needle = filter.value.trim().toLowerCase();
+      document.querySelectorAll('#limit-table tbody tr').forEach((row) => {
+        row.style.display = row.textContent.toLowerCase().includes(needle) ? '' : 'none';
+      });
+    });
+  }
+</script>
+{% endblock %}

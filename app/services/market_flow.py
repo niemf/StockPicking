@@ -28,7 +28,13 @@ STOCK_FLOW_TTL = 3 * 3600
 def _yi(value: float | None, digits: int = 2) -> float | None:
     if value is None:
         return None
-    return round(float(value) / 1e8, digits)
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number:  # NaN
+        return None
+    return round(number / 1e8, digits)
 
 
 def _pick(df: pd.DataFrame, *candidates: str, contains: tuple[str, ...] = ()) -> str | None:
