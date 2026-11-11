@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">SECTORS</p>
+    <h1>板块资金</h1>
+    <p class="subtitle">
+      {{ flow.date }}{% if flow.fetched_at %} · 缓存于 {{ flow.fetched_at[11:16] }}{% endif %} ·
+      来源 {{ '东财资金流' if flow.available else '新浪板块涨幅（资金流不可用）' }}
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <a class="btn btn-ghost" href="/sectors?refresh=true">刷新（可能限流）</a>
+    <a class="btn btn-primary" href="/candidates">看候选池</a>
+  </div>
+</section>
+
+{% if flow.stale %}<div class="flash flash-error">资金流接口暂时不可用，下面是最近一次成功缓存。</div>{% endif %}
+{% if flow.refresh_skipped %}<div class="flash flash-error">刚刚刷新失败过，10 分钟内不再重试，避免延长限流。</div>{% endif %}
+
+{% if flow.available %}
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">净流入板块</span>
+    <strong class="stat-value up">{{ flow.up or 0 }}</strong>
+    <span class="stat-sub">共 {{ flow.count or (flow.rows | length) }} 个板块 · 净流出 {{ flow.down or 0 }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">最大流入</span>
+    <strong class="stat-value up">{{ flow.inflow[0].name if flow.inflow else '—' }}</strong>
+    <span class="stat-sub">{{ flow.inflow[0].net_inflow_yi | money }} 亿 · {{ flow.inflow[0].pct_chg | pct }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">最大流出</span>
+    <strong class="stat-value down">{{ flow.outflow[0].name if flow.outflow else '—' }}</strong>
+    <span class="stat-sub">{{ flow.outflow[0].net_inflow_yi | money }} 亿 · {{ flow.outflow[0].pct_chg | pct }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">板块中位涨幅</span>
+    <strong class="stat-value">观察中</strong>
+    <span class="stat-sub">按主力净流入排序，可搜索板块名</span>
+  </article>
+</section>
+
+{% if flow.rows %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>全部板块（{{ flow.rows | length }}）</h2>
+      <p>单位：亿元 · 按主力净流入排序</p>
+    </div>
+    <input id="sector-filter" class="table-filter" type="search" placeholder="筛选板块 / 领涨股">
+  </div>
+  <div class="table-wrap">
+    <table class="data-table" id="sector-table">
+      <thead>
+        <tr><th>#</th><th>板块</th><th>涨跌幅</th><th>主力净流入</th><th>净占比</th><th>领涨股</th></tr>
+      </thead>
+      <tbody>
+        {% for row in flow.rows %}
+        <tr>
+          <td class="muted">{{ row.rank }}</td>
+          <td><strong>{{ row.name }}</strong></td>
+          <td class="{{ 'up' if (row.pct_chg or 0) > 0 else ('down' if (row.pct_chg or 0) < 0 else 'flat') }}">{{ row.pct_chg | pct }}</td>
+          <td class="{{ 'up' if (row.net_inflow or 0) > 0 else 'down' }}">{{ row.net_inflow_yi | money }}</td>
+          <td class="{{ 'up' if (row.net_ratio or 0) > 0 else 'down' }}">{{ row.net_ratio | pct }}</td>
+          <td class="muted">{{ row.leader or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<div class="sector-columns">
+  <section class="panel">
+    <div class="panel-head"><div><h2>流入前 6</h2><p>单位：亿元</p></div></div>
+    <ul class="briefing-list">
+      {% for item in flow.inflow %}
+      <li>{{ item.name }} · {{ item.pct_chg | pct }} · <span class="up">{{ item.net_inflow_yi | money }}</span> 亿
+        {% if item.leader %}<span class="muted">（{{ item.leader }}）</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><div><h2>流出前 6</h2><p>单位：亿元</p></div></div>
+    <ul class="briefing-list">
+      {% for item in flow.outflow %}
+      <li>{{ item.name }} · {{ item.pct_chg | pct }} · <span class="down">{{ item.net_inflow_yi | money }}</span> 亿
+        {% if item.leader %}<span class="muted">（{{ item.leader }}）</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+<p class="muted empty-note">完整板块列表需要刷新一次资金流接口（每天缓存，刷新前只显示摘要）。</p>
+{% endif %}
+
+{% else %}
+<div class="sector-columns">
+  <section class="panel">
+    <div class="panel-head"><div><h2>板块涨幅前 6</h2><p>Sina 降级数据，没有资金流</p></div></div>
+    <ul class="briefing-list">
+      {% for item in flow.performance_top or [] %}
+      <li>{{ item.name }} · <span class="up">{{ item.pct_chg | pct }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><div><h2>板块跌幅前 6</h2><p>Sina 降级数据</p></div></div>
+    <ul class="briefing-list">
+      {% for item in flow.performance_bottom or [] %}
+      <li>{{ item.name }} · <span class="down">{{ item.pct_chg | pct }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% if flow.error %}<p class="muted empty-note">接口返回：{{ flow.error }}</p>{% endif %}
+{% endif %}
+
+<section class="data-note">
+  板块资金来自东方财富，按交易日缓存 30 分钟；接口限流时回退到新浪板块涨幅并明确标注。资金流只作为板块强弱的参考，不构成投资建议。
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const filter = document.getElementById('sector-filter');
+  if (filter) {
+    filter.addEventListener('input', () => {
+      const needle = filter.value.trim().toLowerCase();
+      document.querySelectorAll('#sector-table tbody tr').forEach((row) => {
+        row.style.display = row.textContent.toLowerCase().includes(needle) ? '' : 'none';
+      });
+    });
+  }
+</script>
+{% endblock %}

@@ -236,8 +236,85 @@ def test_stock_detail_renders_report_panel(client, monkeypatch) -> None:
         source="test",
     )
     monkeypatch.setattr("app.web.routes.quote_service.get_quote", lambda code: quote)
+    monkeypatch.setattr(
+        "app.web.routes.get_stock_fund_flow",
+        lambda code: {
+            "code": code,
+            "date": "2026-11-10",
+            "available": True,
+            "latest": {
+                "date": "2026-11-10",
+                "main_yi": 1.1,
+                "main_ratio": 6.31,
+                "super_yi": 0.6,
+                "big_yi": 0.5,
+                "mid_yi": -0.9,
+                "small_yi": -0.2,
+            },
+            "history": [
+                {"date": "2026-11-09", "main_yi": -1.5},
+                {"date": "2026-11-10", "main_yi": 1.1},
+            ],
+            "main_5d_yi": -0.4,
+            "days": 5,
+        },
+    )
+
+    monkeypatch.setattr(
+        "app.web.routes.get_announcements",
+        lambda code: {
+            "code": code,
+            "available": True,
+            "days": 45,
+            "count": 1,
+            "entries": [
+                {
+                    "code": code,
+                    "date": "2026-11-02",
+                    "title": "关于回购股份进展的公告",
+                    "type": "股东",
+                    "url": "http://static.cninfo.com.cn/finalpage/2026-11-02/2.PDF",
+                }
+            ],
+        },
+    )
 
     response = client.get("/stock/600036")
     assert response.status_code == 200
     assert "AI 研报卡" in response.text
     assert "生成研报卡" in response.text
+    assert "资金流" in response.text
+    assert "主力（当日）" in response.text
+    assert "巨潮资讯" in response.text
+    assert "关于回购股份进展的公告" in response.text
+
+
+def test_sectors_page_renders_table(client, monkeypatch) -> None:
+    row = {
+        "name": "半导体",
+        "rank": 1,
+        "pct_chg": 3.2,
+        "net_inflow": 5.2e9,
+        "net_inflow_yi": 52.0,
+        "net_ratio": 8.1,
+        "leader": "中芯国际",
+    }
+    flow = {
+        "date": "2026-11-10",
+        "available": True,
+        "rows": [row],
+        "count": 1,
+        "up": 1,
+        "down": 0,
+        "inflow": [row],
+        "outflow": [row],
+        "source": "eastmoney",
+    }
+    monkeypatch.setattr("app.web.routes.get_sector_flow", lambda *args, **kwargs: flow)
+
+    response = client.get("/sectors")
+    assert response.status_code == 200
+    assert "板块资金" in response.text
+    assert "半导体" in response.text
+    assert "中芯国际" in response.text
+    assert "全部板块（1）" in response.text

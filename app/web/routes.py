@@ -25,11 +25,12 @@ from app.db.models import AlertEvent, AlertRule, DailyBar, ReviewReport, Stock
 from app.demo_data import INDICES, MARKET_REGIME, get_stock_detail, make_kline
 from app.providers.base import is_main_board, normalize_code
 from app.services import alerts as alert_service
+from app.services.announcements import get_announcements
 from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
-from app.services.market_flow import get_lhb, get_sector_flow
+from app.services.market_flow import get_lhb, get_sector_flow, get_stock_fund_flow
 from app.services.notifier import condition_text
 from app.services.sentiment import market_sentiment
 from app.services.plans import confirm_plan, generate_plans, plan_items, reject_plan
@@ -729,6 +730,8 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
         chart = _chart_payload(code, snap["price"])
 
     report_row = latest_report(db, code)
+    flow = get_stock_fund_flow(code)
+    notices = get_announcements(code)
     return render(
         request,
         "stock_detail.html",
@@ -745,6 +748,8 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "chart": chart,
             "chart_real": chart_real,
             "report": report_dict(report_row) if report_row else None,
+            "flow": flow,
+            "notices": notices,
             "notice": request.query_params.get("ok"),
             "error": request.query_params.get("error"),
             "regime": MARKET_REGIME,
@@ -768,6 +773,22 @@ def stock_report_generate(
     if cached:
         return _redirect(f"/stock/{code}", ok="今日已有研报卡，未重复调用 AI")
     return _redirect(f"/stock/{code}", ok=f"已生成研报卡：{row.conclusion} · {row.score} 分")
+
+
+@router.get("/sectors")
+def sectors_page(request: Request, refresh: bool = False):
+    flow = get_sector_flow(None, refresh=refresh)
+    return render(
+        request,
+        "sectors.html",
+        {
+            "page": "sectors",
+            "page_title": "板块资金",
+            "flow": flow,
+            "regime": MARKET_REGIME,
+            "notice": request.query_params.get("ok"),
+        },
+    )
 
 
 @router.get("/premarket")

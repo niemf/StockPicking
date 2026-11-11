@@ -1571,6 +1571,54 @@ select:focus {
   white-space: pre-wrap;
 }
 
+.sector-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.table-filter {
+  width: 220px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.flow-card {
+  margin-bottom: 18px;
+}
+
+.flow-hero {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.flow-hero div {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f7f9fc;
+}
+
+.flow-hero span {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.flow-hero strong {
+  font-size: 15px;
+}
+
+.flow-hero small {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .flow-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

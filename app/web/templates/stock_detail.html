@@ -183,6 +183,47 @@
   {% endif %}
 </section>
 
+<section class="panel flow-card" id="fund-flow">
+  <div class="panel-head">
+    <div>
+      <h2>资金流</h2>
+      <p>近 10 个交易日{{ flow.metric_label or '主力净流入' }}，单位：亿元</p>
+    </div>
+    <div class="report-actions">
+      <span class="badge badge-source">{{ flow.source_label or '东方财富' }}</span>
+      <span class="badge badge-source">{{ flow.date or '—' }}</span>
+    </div>
+  </div>
+
+  {% if flow.available %}
+  <div class="flow-hero">
+    <div>
+      <span>主力（当日）</span>
+      <strong class="{{ 'up' if (flow.latest.main_yi or 0) > 0 else ('down' if (flow.latest.main_yi or 0) < 0 else 'flat') }}">
+        {{ flow.latest.main_yi | money }}
+      </strong>
+      <small>净占比 {{ flow.latest.main_ratio | pct }}</small>
+    </div>
+    <div>
+      <span>近 {{ flow.days or 5 }} 日{{ flow.metric_label or '主力' }}</span>
+      <strong class="{{ 'up' if (flow.main_5d_yi or 0) > 0 else ('down' if (flow.main_5d_yi or 0) < 0 else 'flat') }}">
+        {{ flow.main_5d_yi | money }}
+      </strong>
+      <small>累计净额</small>
+    </div>
+    <div><span>超大单</span><strong>{{ flow.latest.super_yi | money }}</strong></div>
+    <div><span>大单</span><strong>{{ flow.latest.big_yi | money }}</strong></div>
+    <div><span>中单</span><strong>{{ flow.latest.mid_yi | money }}</strong></div>
+    <div><span>小单</span><strong>{{ flow.latest.small_yi | money }}</strong></div>
+  </div>
+  <div id="flow-chart" class="chart chart-sm"></div>
+  {% if flow.note %}<p class="muted">{{ flow.note }}</p>{% endif %}
+  {% if flow.stale %}<p class="muted">接口限流，展示最近一次成功缓存。</p>{% endif %}
+  {% else %}
+  <p class="muted empty-note">资金流暂不可用{% if flow.error %}：{{ flow.error }}{% endif %}。稍后刷新页面会重试。</p>
+  {% endif %}
+</section>
+
 {% if detail %}
 <div class="detail-sections">
   <section class="panel section-card wide">
@@ -260,31 +301,55 @@
     <div class="panel-head">
       <div>
         <h3>近期公告</h3>
-        <p>演示数据 · 后续由 AkShare 公告接口填充</p>
+        <p>
+          {% if notices.available %}
+          巨潮资讯 · 最近 {{ notices.days }} 天 · {{ notices.count }} 条{% if notices.stale %}（缓存）{% endif %}
+          {% else %}
+          公告接口暂不可用，下面是演示数据
+          {% endif %}
+        </p>
       </div>
       <span class="badge badge-source">最近 30 天</span>
     </div>
     <div class="announcement-list">
-      {% for item in detail.announcements %}
-      <div class="announcement-row">
-        <span class="announcement-date">{{ item.date }}</span>
-        <span class="tag">{{ item.type }}</span>
-        <strong>{{ item.title }}</strong>
-      </div>
-      {% endfor %}
+      {% if notices.available %}
+        {% for item in notices.entries %}
+        <div class="announcement-row">
+          <span class="announcement-date">{{ item.date }}</span>
+          <span class="tag">{{ item.type }}</span>
+          {% if item.url %}
+          <a href="{{ item.url }}" target="_blank" rel="noopener">{{ item.title }}</a>
+          {% else %}
+          <strong>{{ item.title }}</strong>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% if not notices.entries %}
+        <p class="muted empty-note">最近 {{ notices.days }} 天没有公告。</p>
+        {% endif %}
+      {% else %}
+        {% for item in detail.announcements %}
+        <div class="announcement-row">
+          <span class="announcement-date">{{ item.date }}</span>
+          <span class="tag">{{ item.type }}</span>
+          <strong>{{ item.title }}</strong>
+        </div>
+        {% endfor %}
+      {% endif %}
     </div>
   </section>
 </div>
 {% endif %}
 
 <section class="data-note">
-  <strong>数据说明：</strong>实时价格来自腾讯 / 新浪公开接口；K 线、财务、公告、AI 结论当前为演示数据，待接入 AkShare 与 DeepSeek 后替换。本页面不构成投资建议。
+  <strong>数据说明：</strong>实时价格来自腾讯 / 新浪；K 线来自本地日线，研报卡由 DeepSeek 生成，资金流来自东财（限流时降级新浪），公告来自巨潮资讯；财务数据仍为演示内容。本页面不构成投资建议。
 </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
   const chartData = {{ chart | tojson }};
+  const flowHistory = {{ (flow.history if flow and flow.available else []) | tojson }};
 
   function initKline() {
     if (!window.echarts) return;
@@ -379,10 +444,56 @@
     window.addEventListener('resize', () => chart.resize());
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initKline);
-  } else {
+  function initFlow() {
+    if (!window.echarts || !flowHistory.length) return;
+    const el = document.getElementById('flow-chart');
+    if (!el) return;
+
+    const chart = echarts.init(el);
+    chart.setOption({
+      animation: false,
+      grid: { left: 48, right: 16, top: 18, bottom: 28 },
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: '#fff',
+        borderColor: '#e6eaf2',
+        textStyle: { color: '#16203a', fontSize: 12 },
+        valueFormatter: (value) => `${value} 亿`
+      },
+      xAxis: {
+        type: 'category',
+        data: flowHistory.map((item) => item.date.slice(5)),
+        axisLine: { lineStyle: { color: '#d7dce8' } },
+        axisLabel: { color: '#8a93a6', fontSize: 11 }
+      },
+      yAxis: {
+        type: 'value',
+        splitLine: { lineStyle: { color: '#eef1f7' } },
+        axisLabel: { color: '#8a93a6', fontSize: 11 }
+      },
+      series: [
+        {
+          name: '主力净流入',
+          type: 'bar',
+          data: flowHistory.map((item) => ({
+            value: item.main_yi,
+            itemStyle: { color: (item.main_yi || 0) >= 0 ? '#e5484d' : '#12a150' }
+          }))
+        }
+      ]
+    });
+    window.addEventListener('resize', () => chart.resize());
+  }
+
+  function boot() {
     initKline();
+    initFlow();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
   }
 </script>
 {% endblock %}

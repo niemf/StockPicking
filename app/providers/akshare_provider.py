@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 from loguru import logger
 
-from app.providers.base import board_label, is_main_board, normalize_code
+from app.providers.base import board_label, exchange_for_code, is_main_board, normalize_code
 
 
 @dataclass(slots=True)
@@ -287,6 +287,16 @@ class AkShareProvider:
         """Sina industry-board performance, used when fund-flow data is down."""
         ak = _ak()
         return ak.stock_sector_spot(indicator="新浪行业")
+
+    def get_stock_fund_flow(self, code: str, days: int = 60) -> pd.DataFrame:
+        """Per-stock daily capital flow (main / super / big / mid / small)."""
+        ak = _ak()
+        value = normalize_code(code)
+        market = "sh" if exchange_for_code(value) == "sh" else "sz"
+        df = ak.stock_individual_fund_flow(stock=value, market=market)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df.tail(days).reset_index(drop=True)
 
     # ------------------------------------------------------------------ calendar
     def get_trade_calendar(self, start: date | None = None, end: date | None = None) -> list[date]:
