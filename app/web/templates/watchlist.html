@@ -95,10 +95,28 @@
     </div>
 
     {% if item.tech and item.tech.available %}
-    <div class="tech-panel">
-      <div class="tech-head">
-        <span class="tech-trend {{ item.tech.trend_class }}">{{ item.tech.trend }}</span>
-        <span class="muted">{{ item.tech.volume_state }}{% if item.tech.volume_ratio is not none %} · 量比 {{ item.tech.volume_ratio | num2 }}{% endif %}</span>
+    <section class="verdict-panel {{ item.tech.verdict_class }}">
+      <div class="verdict-head">
+        <span class="verdict-badge">{{ item.tech.verdict }}</span>
+        <span class="verdict-score">评分 {{ '%+d' | format(item.tech.score) }} · {{ item.tech.trend }}</span>
+        <span class="verdict-strength">置信度 {{ item.tech.strength }}%</span>
+      </div>
+      <p class="verdict-summary">{{ item.tech.summary }}</p>
+      <div class="signal-cols">
+        <ul class="signal-list bull">
+          {% for signal in item.tech.bullish[:3] %}
+          <li>{{ signal.label }}{% if signal.detail %} <small>{{ signal.detail }}</small>{% endif %}</li>
+          {% else %}
+          <li class="muted">暂无看多信号</li>
+          {% endfor %}
+        </ul>
+        <ul class="signal-list bear">
+          {% for signal in item.tech.bearish[:3] %}
+          <li>{{ signal.label }}{% if signal.detail %} <small>{{ signal.detail }}</small>{% endif %}</li>
+          {% else %}
+          <li class="muted">暂无看空信号</li>
+          {% endfor %}
+        </ul>
       </div>
       <div class="ma-row">
         {% for label, value in [('MA5', item.tech.ma5), ('MA10', item.tech.ma10), ('MA20', item.tech.ma20), ('MA30', item.tech.ma30), ('MA60', item.tech.ma60)] %}
@@ -108,12 +126,18 @@
         </span>
         {% endfor %}
       </div>
-      <div class="level-row">
-        <span>支撑 <strong class="up">{{ item.tech.support | num2 }}</strong>{% if item.tech.support_dist is not none %}<small>{{ item.tech.support_dist | pct }}</small>{% endif %}</span>
-        <span>压力 <strong class="down">{{ item.tech.resistance | num2 }}</strong>{% if item.tech.resistance_dist is not none %}<small>+{{ item.tech.resistance_dist | num2 }}%</small>{% endif %}</span>
-        <span>密集区 <strong>{{ item.tech.dense_low | num2 }}–{{ item.tech.dense_high | num2 }}</strong></span>
+      <div class="fact-grid">
+        <div><span>成交额</span><strong>{{ item.tech.amount_yi | num2 }} 亿</strong></div>
+        <div><span>换手率</span><strong>{{ item.tech.turnover_rate | num2 }}%</strong></div>
+        <div><span>量比</span><strong>{{ item.tech.volume_ratio | num2 }}</strong></div>
+        <div><span>MA20 斜率</span><strong>{{ item.tech.ma20_slope3 | num2 }}%</strong></div>
+        <div><span>RSI12</span><strong>{{ item.tech.rsi12 | num2 }}</strong></div>
+        <div><span>ATR</span><strong>{{ item.tech.atr_pct | num2 }}%</strong></div>
+        <div><span>支撑</span><strong class="up">{{ item.tech.support | num2 }}</strong></div>
+        <div><span>压力</span><strong class="down">{{ item.tech.resistance | num2 }}</strong></div>
+        <div><span>密集区</span><strong>{{ item.tech.dense_low | num2 }}–{{ item.tech.dense_high | num2 }}</strong></div>
       </div>
-    </div>
+    </section>
     {% endif %}
 
     {% if item.has_plan %}
@@ -136,39 +160,31 @@
     </div>
     {% endif %}
 
-    {% if item.report_card %}
-    <div class="watch-report">
-      <div class="watch-report-head">
-        <span class="badge badge-{{ item.report_card.badge }}">{{ item.report_card.conclusion }} · {{ item.report_card.score }} 分</span>
-        <span class="muted">{{ item.report_card.trade_date }} · {{ item.report_card.score_label }}</span>
+    <details class="ai-details">
+      <summary>
+        {% if item.report_card %}
+        AI 研报卡：{{ item.report_card.conclusion }} · {{ item.report_card.score }} 分（{{ item.report_card.trade_date }}）
+        {% else %}
+        AI 深度研报（可选，约 ¥0.005）
+        {% endif %}
+      </summary>
+      {% if item.report_card %}
+      <p>{{ item.report_card.summary | truncate(180, True, '…') }}</p>
+      <div class="ai-actions">
+        <a class="link" href="/stock/{{ item.code }}#ai-report">查看完整研报卡 →</a>
         <form method="post" action="/watchlist/{{ item.code }}/analyze">
           <input type="hidden" name="refresh" value="1">
           <button class="btn btn-ghost btn-xs" type="submit">重新生成</button>
         </form>
       </div>
-      <p>{{ item.report_card.summary | truncate(150, True, '…') }}</p>
-      <div class="watch-report-foot">
-        <a class="link" href="/stock/{{ item.code }}#ai-report">查看完整研报卡 →</a>
-      </div>
-    </div>
-    {% elif item.tech and item.tech.available %}
-    <form class="watch-report-empty" method="post" action="/watchlist/{{ item.code }}/analyze">
-      <div>
-        <strong>还没有 AI 研报卡</strong>
-        <small>{{ item.tech.summary }}</small>
-      </div>
-      <button class="btn btn-primary btn-xs" type="submit">生成分析（约 ¥0.005）</button>
-    </form>
-    {% endif %}
+      {% else %}
+      <form method="post" action="/watchlist/{{ item.code }}/analyze">
+        <button class="btn btn-ghost btn-xs" type="submit">生成 AI 研报卡</button>
+      </form>
+      {% endif %}
+    </details>
 
-    {% if not item.has_plan and not item.report_card %}
-    <div class="plan-empty">
-      <strong>尚未设置交易计划</strong>
-      <span>上方已给出均线、量能与支撑压力；生成研报卡可补充结论与操作清单。</span>
-    </div>
-    {% endif %}
-
-    {% if item.has_plan or not item.tech %}
+    {% if item.has_plan %}
     <p class="watch-reason">{{ item.reason }}</p>
     {% endif %}
 

@@ -1579,6 +1579,143 @@ select:focus {
   color: var(--muted);
 }
 
+.verdict-panel {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fbfcfe;
+}
+
+.verdict-panel.up {
+  border-color: #fecdd3;
+  background: #fff8f8;
+}
+
+.verdict-panel.down {
+  border-color: #bbf7d0;
+  background: #f6fdf9;
+}
+
+.verdict-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.verdict-badge {
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.verdict-panel.up .verdict-badge {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.verdict-panel.down .verdict-badge {
+  background: #dcfce7;
+  color: #16a34a;
+}
+
+.verdict-score {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.verdict-strength {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.verdict-summary {
+  margin: 8px 0;
+  font-size: 12.5px;
+  line-height: 1.75;
+}
+
+.signal-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.signal-list {
+  margin: 0;
+  padding-left: 16px;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.signal-list.bull li {
+  color: #b42318;
+}
+
+.signal-list.bear li {
+  color: #15803d;
+}
+
+.signal-list small {
+  margin-left: 3px;
+  color: var(--muted);
+}
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.fact-grid div {
+  padding: 5px 7px;
+  border: 1px solid #eef1f7;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.fact-grid span {
+  display: block;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.fact-grid strong {
+  font-size: 12px;
+}
+
+.ai-details {
+  margin: 10px 0 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.ai-details summary {
+  cursor: pointer;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.ai-details p {
+  margin: 8px 0;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ai-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .report-card {
   margin-bottom: 18px;
 }

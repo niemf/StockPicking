@@ -768,6 +768,7 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
     report_row = latest_report(db, code)
     flow = get_stock_fund_flow(code)
     notices = get_announcements(code)
+    analysis = snapshot_many(db, [code], {code: quote} if quote else {}).get(code)
     return render(
         request,
         "stock_detail.html",
@@ -784,6 +785,7 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "chart": chart,
             "chart_real": chart_real,
             "report": report_dict(report_row) if report_row else None,
+            "analysis": analysis,
             "flow": flow,
             "notices": notices,
             "notice": request.query_params.get("ok"),
@@ -1290,6 +1292,38 @@ def api_report_generate(code: str, force: bool = False, db: Session = Depends(ge
         "cost": log.cost if log is not None else 0.0,
         **report_dict(row),
     }
+
+
+@router.get("/api/analysis")
+def api_analysis_batch(codes: str, db: Session = Depends(get_db)):
+    requested = [part.strip() for part in codes.split(",") if part.strip()][:30]
+    valid: list[str] = []
+    for item in requested:
+        try:
+            value = normalize_code(item)
+        except ValueError:
+            continue
+        if is_main_board(value) and value not in valid:
+            valid.append(value)
+    quotes = quote_service.get_quotes(valid) if valid else {}
+    data = snapshot_many(db, valid, quotes)
+    return {"count": len(data), "items": [data[code] for code in valid]}
+
+
+@router.get("/api/analysis/{code}")
+def api_analysis(code: str, db: Session = Depends(get_db)):
+    try:
+        value = normalize_code(code)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="无效的股票代码") from exc
+    if not is_main_board(value):
+        raise HTTPException(status_code=404, detail="仅支持沪深主板")
+
+    quote = quote_service.get_quote(value)
+    data = snapshot_many(db, [value], {value: quote} if quote else {}).get(value)
+    if data is None or not data.get("available"):
+        raise HTTPException(status_code=404, detail="日线不足，先回补日线数据")
+    return data
 
 
 @router.get("/api/premarket")

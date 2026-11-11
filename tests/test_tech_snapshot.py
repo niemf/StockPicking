@@ -79,7 +79,54 @@ def test_build_snapshot_levels_and_trend() -> None:
     assert snapshot["dense_low"] >= bars["low"].min()
     assert snapshot["dense_high"] <= bars["high"].max()
     assert snapshot["volume_state"] in {"放量", "量能正常", "缩量"}
-    assert "支撑" in snapshot["summary"]
+    assert snapshot["verdict"] in {"看多", "中性", "看空"}
+    assert snapshot["verdict"] == "看多"
+    assert snapshot["score"] > 0
+    assert snapshot["bullish"]
+    assert "综合评分" in snapshot["summary"]
+
+
+def test_verdict_is_bearish_on_downtrend() -> None:
+    rows = []
+    start = date(2026, 8, 1)
+    for index in range(60):
+        close = 20.0 - index * 0.12
+        rows.append(
+            {
+                "trade_date": start + timedelta(days=index),
+                "open": close + 0.03,
+                "high": close + 0.08,
+                "low": close - 0.08,
+                "close": close,
+                "volume": 1_000_000.0,
+                "amount": 1e8,
+                "turnover_rate": 1.0,
+            }
+        )
+    bars = pd.DataFrame(rows)
+    quote = Quote(
+        code="600036",
+        name="招商银行",
+        price=float(bars["close"].iloc[-1]),
+        pre_close=float(bars["close"].iloc[-1]) + 0.1,
+        open=float(bars["close"].iloc[-1]),
+        high=float(bars["close"].iloc[-1]),
+        low=float(bars["close"].iloc[-1]),
+        volume=1_200_000.0,
+        amount=1e8,
+        pct_chg=-0.6,
+        change=-0.1,
+        turnover_rate=1.0,
+        ts=datetime.now(),
+        source="test",
+    )
+    snapshot = build_snapshot("600036", bars, quote, name="招商银行", industry="银行")
+
+    assert snapshot["verdict"] == "看空"
+    assert snapshot["verdict_class"] == "down"
+    assert snapshot["score"] < 0
+    assert snapshot["bearish"]
+    assert "综合评分" in snapshot["summary"]
 
 
 def test_build_snapshot_handles_short_history() -> None:

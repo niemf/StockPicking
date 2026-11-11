@@ -110,6 +110,52 @@
 {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 {% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
 
+{% if analysis and analysis.available %}
+<section class="panel verdict-panel {{ analysis.verdict_class }}" id="diagnosis">
+  <div class="verdict-head">
+    <span class="verdict-badge">{{ analysis.verdict }}</span>
+    <span class="verdict-score">评分 {{ '%+d' | format(analysis.score) }} · {{ analysis.trend }}</span>
+    <span class="verdict-strength">置信度 {{ analysis.strength }}% · 数据截至 {{ analysis.last_bar }}</span>
+  </div>
+  <p class="verdict-summary">{{ analysis.summary }}</p>
+  <div class="signal-cols">
+    <ul class="signal-list bull">
+      {% for signal in analysis.bullish[:4] %}
+      <li>{{ signal.label }}{% if signal.detail %} <small>{{ signal.detail }}</small>{% endif %}</li>
+      {% else %}
+      <li class="muted">暂无看多信号</li>
+      {% endfor %}
+    </ul>
+    <ul class="signal-list bear">
+      {% for signal in analysis.bearish[:4] %}
+      <li>{{ signal.label }}{% if signal.detail %} <small>{{ signal.detail }}</small>{% endif %}</li>
+      {% else %}
+      <li class="muted">暂无看空信号</li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="ma-row">
+    {% for label, value in [('MA5', analysis.ma5), ('MA10', analysis.ma10), ('MA20', analysis.ma20), ('MA30', analysis.ma30), ('MA60', analysis.ma60)] %}
+    <span class="ma-cell">
+      <small>{{ label }}</small>
+      <strong class="{% if value is not none and analysis.price >= value %}up{% elif value is not none %}down{% endif %}">{{ value | num2 }}</strong>
+    </span>
+    {% endfor %}
+  </div>
+  <div class="fact-grid">
+    <div><span>成交额</span><strong>{{ analysis.amount_yi | num2 }} 亿</strong></div>
+    <div><span>换手率</span><strong>{{ analysis.turnover_rate | num2 }}%</strong></div>
+    <div><span>量比</span><strong>{{ analysis.volume_ratio | num2 }}</strong></div>
+    <div><span>MA20 斜率</span><strong>{{ analysis.ma20_slope3 | num2 }}%</strong></div>
+    <div><span>RSI12</span><strong>{{ analysis.rsi12 | num2 }}</strong></div>
+    <div><span>ATR</span><strong>{{ analysis.atr_pct | num2 }}%</strong></div>
+    <div><span>支撑</span><strong class="up">{{ analysis.support | num2 }}</strong></div>
+    <div><span>压力</span><strong class="down">{{ analysis.resistance | num2 }}</strong></div>
+    <div><span>筹码密集区</span><strong>{{ analysis.dense_low | num2 }}–{{ analysis.dense_high | num2 }}</strong></div>
+  </div>
+</section>
+{% endif %}
+
 <section class="panel report-card" id="ai-report">
   <div class="panel-head">
     <div>

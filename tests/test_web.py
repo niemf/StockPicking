@@ -185,23 +185,34 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
                 "code": "600036",
                 "price": 43.1,
                 "pct_chg": 0.2,
+                "amount_yi": 4.0,
+                "turnover_rate": 1.2,
                 "ma5": 43.2,
                 "ma10": 43.0,
                 "ma20": 42.5,
                 "ma30": 41.8,
                 "ma60": 40.9,
                 "ma20_dist": 1.4,
+                "ma20_slope3": 0.6,
                 "trend": "多头排列",
                 "trend_class": "up",
                 "volume_ratio": 1.32,
                 "volume_state": "量能正常",
+                "rsi12": 62.0,
+                "atr_pct": 2.1,
                 "support": 42.2,
                 "resistance": 44.0,
                 "support_dist": 2.1,
                 "resistance_dist": 2.1,
                 "dense_low": 42.8,
                 "dense_high": 43.6,
-                "summary": "均线多头排列；支撑 42.20 / 压力 44.00",
+                "score": 6,
+                "verdict": "看多",
+                "verdict_class": "up",
+                "strength": 80,
+                "bullish": [{"label": "站上 MA20", "detail": "+1.4%", "weight": 2}],
+                "bearish": [{"label": "接近压力位", "detail": "距压力 2.1%", "weight": -1}],
+                "summary": "现价 43.10；均线多头排列；综合评分 +6 → 看多。",
             }
         },
     )
@@ -222,12 +233,15 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
 
     response = client.get("/watchlist")
     assert response.status_code == 200
+    assert "看多" in response.text
+    assert "评分 +6" in response.text
     assert "多头排列" in response.text
     assert "MA30" in response.text
     assert "支撑" in response.text and "压力" in response.text
     assert "密集区" in response.text
-    assert "看多 · 72 分" in response.text
+    assert "AI 研报卡：看多" in response.text
     assert "站上 MA20" in response.text
+    assert "站上 MA20，量能温和" in response.text
     assert "重新生成" in response.text
 
 
@@ -403,6 +417,48 @@ def test_limit_board_page_handles_unavailable(client, monkeypatch) -> None:
     assert response.status_code == 200
     assert "涨停池暂不可用" in response.text
     assert "限流" in response.text
+
+
+def test_analysis_api_single_and_batch(client, monkeypatch) -> None:
+    def fake_snapshot(db, codes, quotes=None):
+        return {
+            code: {
+                "available": True,
+                "code": code,
+                "verdict": "看多",
+                "verdict_class": "up",
+                "score": 5,
+            }
+            for code in codes
+        }
+
+    monkeypatch.setattr("app.web.routes.snapshot_many", fake_snapshot)
+    monkeypatch.setattr("app.web.routes.quote_service.get_quote", lambda code: None)
+    monkeypatch.setattr("app.web.routes.quote_service.get_quotes", lambda codes: {})
+
+    single = client.get("/api/analysis/600036")
+    assert single.status_code == 200
+    assert single.json()["verdict"] == "看多"
+
+    batch = client.get("/api/analysis?codes=600036,601318,300750")
+    assert batch.status_code == 200
+    payload = batch.json()
+    assert payload["count"] == 2
+    assert {item["code"] for item in payload["items"]} == {"600036", "601318"}
+
+    bad = client.get("/api/analysis/300750")
+    assert bad.status_code == 404
+
+
+def test_analysis_api_reports_missing_bars(client, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.web.routes.snapshot_many",
+        lambda db, codes, quotes=None: {code: {"available": False, "code": code} for code in codes},
+    )
+    monkeypatch.setattr("app.web.routes.quote_service.get_quote", lambda code: None)
+
+    response = client.get("/api/analysis/600036")
+    assert response.status_code == 404
 
 
 def test_stock_detail_renders_report_panel(client, monkeypatch) -> None:
