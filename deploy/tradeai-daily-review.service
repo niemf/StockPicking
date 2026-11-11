@@ -1,0 +1,13 @@
+[Unit]
+Description=TradeAI daily review (AI narrative)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tradeai
+Group=tradeai
+WorkingDirectory=/opt/tradeai
+EnvironmentFile=/opt/tradeai/.env
+ExecStart=/opt/tradeai/.venv/bin/python scripts/daily_review.py
+TimeoutStartSec=600

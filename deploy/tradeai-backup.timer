@@ -1,0 +1,10 @@
+[Unit]
+Description=Run TradeAI SQLite backup every night
+
+[Timer]
+OnCalendar=*-*-* 23:30:00
+Persistent=true
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target

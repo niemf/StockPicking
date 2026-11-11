@@ -318,6 +318,14 @@ def test_report_card_api_reports_missing(client) -> None:
     assert bad.status_code == 404
 
 
+def test_liveness_endpoint(client) -> None:
+    response = client.get("/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["app"]
+
+
 def test_premarket_preview_api(client) -> None:
     response = client.get("/api/premarket")
     assert response.status_code == 200

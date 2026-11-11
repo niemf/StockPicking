@@ -1,0 +1,10 @@
+[Unit]
+Description=Run TradeAI premarket briefing on trading weekday mornings
+
+[Timer]
+OnCalendar=Mon..Fri 08:45:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

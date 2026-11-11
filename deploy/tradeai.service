@@ -1,0 +1,26 @@
+[Unit]
+Description=TradeAI web app (FastAPI + uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradeai
+Group=tradeai
+WorkingDirectory=/opt/tradeai
+EnvironmentFile=/opt/tradeai/.env
+ExecStart=/opt/tradeai/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+KillSignal=SIGINT
+
+# Hardening (data/ and .env stay writable for the app itself)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/opt/tradeai/data /opt/tradeai/backups
+
+[Install]
+WantedBy=multi-user.target

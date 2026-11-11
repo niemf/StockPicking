@@ -1,0 +1,13 @@
+[Unit]
+Description=TradeAI post-close update (bars + discovery + warm-up)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tradeai
+Group=tradeai
+WorkingDirectory=/opt/tradeai
+EnvironmentFile=/opt/tradeai/.env
+ExecStart=/opt/tradeai/.venv/bin/python scripts/daily_update.py
+TimeoutStartSec=1800

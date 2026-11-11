@@ -1,0 +1,13 @@
+[Unit]
+Description=TradeAI premarket briefing (08:45)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=tradeai
+Group=tradeai
+WorkingDirectory=/opt/tradeai
+EnvironmentFile=/opt/tradeai/.env
+ExecStart=/opt/tradeai/.venv/bin/python scripts/premarket.py --send
+TimeoutStartSec=300

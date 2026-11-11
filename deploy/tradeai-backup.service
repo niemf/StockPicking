@@ -1,0 +1,11 @@
+[Unit]
+Description=TradeAI nightly SQLite backup
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradeai
+Group=tradeai
+WorkingDirectory=/opt/tradeai
+ExecStart=/opt/tradeai/deploy/backup.sh
+Nice=10

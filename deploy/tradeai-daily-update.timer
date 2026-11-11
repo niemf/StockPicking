@@ -1,0 +1,10 @@
+[Unit]
+Description=Run TradeAI post-close update on trading weekdays
+
+[Timer]
+OnCalendar=Mon..Fri 15:35:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

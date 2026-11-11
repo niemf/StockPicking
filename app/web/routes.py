@@ -1162,6 +1162,12 @@ def alerts_rule_delete(rule_id: int, db: Session = Depends(get_db)):
 
 
 # ------------------------------------------------------------------ api
+@router.get("/health")
+def liveness():
+    """Lightweight liveness probe for nginx / uptime checks (no DB work)."""
+    return {"ok": True, "app": settings.app_name}
+
+
 @router.get("/api/health")
 def health(db: Session = Depends(get_db)):
     database = check_database()

@@ -38,9 +38,9 @@ A 股主板价格监控与 AI 复盘系统（个人自用）。
 | Web | FastAPI + Jinja2 + HTMX + ECharts |
 | 数据 | pandas + AkShare（日线/财务/公告） |
 | 实时行情 | 腾讯 `qt.gtimg.cn` / 新浪 `hq.sinajs.cn` |
-| 数据库 | 暂未接入，计划 SQLite（SQLAlchemy，后续可迁 PostgreSQL） |
-| AI | DeepSeek（后续接入） |
-| 通知 | 飞书 Webhook / SMTP 邮件（后续接入） |
+| 数据库 | SQLite（SQLAlchemy，WAL；可切 PostgreSQL） |
+| AI | DeepSeek（研报卡 / 计划 / 复盘叙述） |
+| 通知 | 飞书 Webhook / SMTP 邮件兜底 |
 
 ## 目录结构
 
@@ -90,6 +90,12 @@ TradeAI/
 │       ├── routes.py           # 页面路由
 │       ├── templates/          # Jinja2 模板
 │       └── static/             # CSS / JS
+├── deploy/
+│   ├── README.md               # 云服务器部署手册（Ubuntu 24.04）
+│   ├── tradeai.service         # Web + 盘中轮询（systemd）
+│   ├── tradeai-*.service/.timer# 盘前 / 收盘更新 / 复盘 / 备份
+│   ├── backup.sh               # SQLite 备份（保留 14 天）
+│   └── nginx-tradeai.conf      # 可选反向代理
 ├── scripts/
 │   ├── init_db.py              # 建表 / 播种 / 重置数据库
 │   ├── monitor_once.py         # 手动试跑一次轮询（--dry-run / --send）
@@ -106,6 +112,7 @@ TradeAI/
 │   ├── fetch_vendor.py         # 下载 ECharts / HTMX 到本地
 │   ├── run.ps1                 # 启动开发服务器
 │   ├── restart.ps1             # 杀掉旧进程后重启（改路由后必用）
+│   ├── package.ps1             # 生成 Linux 发布包（排除 .env/data）
 │   ├── schedule_tasks.ps1      # 注册/查看/移除 Windows 每日任务
 │   └── verify_all.ps1          # 一键跑全部数据源验证
 ├── tests/
@@ -204,6 +211,32 @@ powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove
 | 18:00 | `daily_review.py` | 每日复盘（AI 叙述，约 0.015 元/天） |
 
 日志落在 `data\logs\tradeai-*.log`。任务只在登录状态下运行，电脑需开机；盘中预警仍由 `MONITOR_ENABLED=true` 的常驻进程负责。
+
+## 云服务器部署（Ubuntu 24.04）
+
+发布包与 systemd 单元已准备好，完整步骤见 [`deploy/README.md`](deploy/README.md)。最短路径：
+
+```powershell
+# 1. 本地打包（不含 .env / data）
+powershell -ExecutionPolicy Bypass -File scripts\package.ps1
+scp dist\tradeai.tar.gz ubuntu@1.2.3.4:/tmp/
+```
+
+```bash
+# 2. 服务器解压 + 建 venv + 配 .env（见 deploy/env.example）
+sudo -u tradeai tar -xzf /tmp/tradeai.tar.gz -C /opt/tradeai
+sudo -u tradeai python3.12 -m venv /opt/tradeai/.venv
+sudo -u tradeai /opt/tradeai/.venv/bin/pip install -r /opt/tradeai/requirements.txt
+sudo -u tradeai cp /opt/tradeai/deploy/env.example /opt/tradeai/.env  # 再填 key
+
+# 3. 安装常驻服务 + 4 个定时器（08:45 / 15:35 / 18:00 / 23:30）
+sudo APP_DIR=/opt/tradeai bash /opt/tradeai/deploy/install.sh
+```
+
+- `tradeai.service`：uvicorn 单 worker，监听 `127.0.0.1:8000`，`MONITOR_ENABLED=true` 时顺带跑盘中轮询；
+- 定时器：盘前简报、收盘更新（K 线 + 发现 + 涨停池预热）、每日复盘、SQLite 备份；
+- 对外访问优先 Tailscale；域名 80/443 需要 ICP 备案，nginx 配置已放在 `deploy/nginx-tradeai.conf`；
+- 健康检查：`GET /health`（轻量存活）与 `GET /api/health`（数据库/日历/监控状态）。
 
 ## 数据库
 
@@ -471,7 +504,7 @@ curl.exe "http://127.0.0.1:8000/api/analysis?codes=600036,601318,002594"
 & '.venv\python.exe' -m pytest
 ```
 
-当前 141 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、技术诊断与看多看空评分、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排、板块资金/龙虎榜/个股资金流多源降级、涨停梯队与席位解析、公告分类与缓存、AI 预算/计划校验/研报卡/复盘、盘前简报分段与推送。
+当前 142 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、技术诊断与看多看空评分、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排、板块资金/龙虎榜/个股资金流多源降级、涨停梯队与席位解析、公告分类与缓存、AI 预算/计划校验/研报卡/复盘、盘前简报分段与推送。
 
 ## 数据源验证
 
@@ -499,9 +532,10 @@ curl.exe "http://127.0.0.1:8000/api/analysis?codes=600036,601318,002594"
 3. ✅ 交易日历 + 盘中轮询 + 预警状态机
 4. ✅ 飞书 / 邮件通知
 5. ✅ 技术指标 + 全主板股票发现
-6. ✅ DeepSeek 交易计划与每日复盘（已用真实 key 验证，单日成本约 ¥0.05）
-7. ⏸️ 腾讯云轻量部署 + 域名 + systemd/cron（未完成，清单见 `docs/项目大纲.md` 6.1）
-8. ⏸️ 多人版改造：用户体系、自选隔离、通知渠道绑定、PostgreSQL（未开始，见 `docs/产品演进-多人版.md`）
+6. ✅ DeepSeek 交易计划与每日复盘（真实 key 验证，单日约 ¥0.05）
+7. ✅ 市场情绪、组合预警、自选分组、研报卡、盘前简报、板块资金、涨停梯队、公告、确定性技术诊断
+8. 🚧 腾讯云部署：发布包与 systemd/timer/备份脚本已准备（`deploy/`），等待购买服务器后按手册执行
+9. ⏸️ 多人版改造：用户体系、自选隔离、通知渠道绑定、PostgreSQL（未开始，见 `docs/产品演进-多人版.md`）
 
 ## 免责声明
 

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run TradeAI daily review on trading weekdays
+
+[Timer]
+OnCalendar=Mon..Fri 18:00:00
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
