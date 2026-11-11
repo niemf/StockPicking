@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">PREMARKET</p>
+    <h1>盘前简报</h1>
+    <p class="subtitle">
+      {{ briefing.title }} · 昨日复盘 {{ briefing.previous_review or '缺失' }} ·
+      {% if briefing.trading_day %}今日交易日{% else %}今日非交易日{% endif %}
+    </p>
+  </div>
+  <div class="page-head-actions">
+    <form method="post" action="/premarket/send">
+      {% if not briefing.trading_day %}<input type="hidden" name="force" value="1">{% endif %}
+      <button class="btn btn-primary" type="submit">推送到飞书</button>
+    </form>
+    <a class="btn btn-ghost" href="/reports">查看昨日复盘</a>
+  </div>
+</section>
+
+{% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+{% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+
+<div class="premarket-grid">
+  {% for section in briefing.sections %}
+  <section class="panel premarket-section">
+    <div class="panel-head">
+      <div>
+        <h2>{{ section.title }}</h2>
+        <p>{{ section.lines | length }} 条</p>
+      </div>
+    </div>
+    <ul class="briefing-list">
+      {% for line in section.lines %}
+      <li>{{ line.lstrip('- ').strip() }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>纯文本预览</h2>
+      <p>与飞书卡片内容一致，方便复制到别处</p>
+    </div>
+  </div>
+  <pre class="briefing-text">{{ briefing.text }}</pre>
+</section>
+
+<section class="data-note">
+  简报只使用昨日收盘、已确认计划与本地复盘，不调用 AI；推送失败会写入 notification_log。
+</section>
+{% endblock %}

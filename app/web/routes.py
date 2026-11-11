@@ -33,6 +33,7 @@ from app.services.market_flow import get_lhb, get_sector_flow
 from app.services.notifier import condition_text
 from app.services.sentiment import market_sentiment
 from app.services.plans import confirm_plan, generate_plans, plan_items, reject_plan
+from app.services.premarket import build_briefing, send_briefing
 from app.services.portfolio import (
     PortfolioError,
     add_holding,
@@ -769,6 +770,44 @@ def stock_report_generate(
     return _redirect(f"/stock/{code}", ok=f"已生成研报卡：{row.conclusion} · {row.score} 分")
 
 
+@router.get("/premarket")
+def premarket_page(
+    request: Request,
+    day: str | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError:
+        target = None
+    briefing = build_briefing(db, day=target)
+    return render(
+        request,
+        "premarket.html",
+        {
+            "page": "dashboard",
+            "page_title": "盘前简报",
+            "briefing": briefing,
+            "error": request.query_params.get("error"),
+            "notice": request.query_params.get("ok"),
+            "regime": MARKET_REGIME,
+        },
+    )
+
+
+@router.post("/premarket/send")
+def premarket_send(
+    force: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    result = send_briefing(db, force=bool(force))
+    if result.get("reason") == "non_trading_day":
+        return _redirect("/premarket", error="今天是交易日以外的日期，未发送")
+    if not result["sent"]:
+        return _redirect("/premarket", error=f"推送失败：{result['response'][:120]}")
+    return _redirect("/premarket", ok="已推送到飞书")
+
+
 @router.get("/candidates")
 def candidates(request: Request, db: Session = Depends(get_db)):
     trade_date, rows = latest_candidates(db, limit=100)
@@ -1150,6 +1189,20 @@ def api_report_generate(code: str, force: bool = False, db: Session = Depends(ge
         "cost": log.cost if log is not None else 0.0,
         **report_dict(row),
     }
+
+
+@router.get("/api/premarket")
+def api_premarket(day: str | None = None, db: Session = Depends(get_db)):
+    try:
+        target = date.fromisoformat(day) if day else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="日期格式应为 YYYY-MM-DD") from exc
+    return build_briefing(db, day=target)
+
+
+@router.post("/api/premarket/send")
+def api_premarket_send(force: bool = False, db: Session = Depends(get_db)):
+    return send_briefing(db, force=force)
 
 
 @router.post("/api/ai/plans/generate")

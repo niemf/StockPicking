@@ -171,6 +171,35 @@ def build_feishu_payload(event: AlertEvent) -> dict[str, Any]:
     }
 
 
+def build_text_payload(
+    title: str,
+    lines: list[str],
+    *,
+    template: str = "blue",
+    footer: str | None = None,
+) -> dict[str, Any]:
+    """A simple Feishu card for digests (premarket briefing, manual notes)."""
+    elements: list[dict[str, Any]] = [
+        {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}}
+    ]
+    if footer:
+        elements.append({"tag": "hr"})
+        elements.append(
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": footer}]}
+        )
+    return {
+        "msg_type": "interactive",
+        "card": {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "template": template,
+                "title": {"tag": "plain_text", "content": title},
+            },
+            "elements": elements,
+        },
+    }
+
+
 def build_email_text(event: AlertEvent) -> tuple[str, str]:
     snapshot = event.condition_snapshot or {}
     rule_type = _rule_type_of(event)
@@ -366,3 +395,44 @@ class Notifier:
             log = self.send_event(session, event)
             summary["sent" if log.status == "success" else "failed"] += 1
         return summary
+
+    def send_text(
+        self,
+        session: Session,
+        title: str,
+        lines: list[str],
+        *,
+        template: str = "blue",
+        footer: str | None = None,
+        retries: int = 2,
+    ) -> NotificationLog:
+        """Send a digest card (no alert event) and log the attempt."""
+        payload = build_text_payload(title, lines, template=template, footer=footer)
+        ok = False
+        body = "feishu webhook 未配置"
+        attempts = 0
+        if self.webhook:
+            for attempt in range(1, retries + 1):
+                attempts = attempt
+                try:
+                    status, body = self.transport(self.webhook, payload)
+                    ok = status == 200 and _feishu_ok(body)
+                except Exception as exc:  # noqa: BLE001 - digests must never crash the caller
+                    ok, body = False, f"请求异常：{exc}"
+                if ok:
+                    break
+                logger.warning("digest send failed (attempt {}/{}): {}", attempt, retries, body[:120])
+                if attempt < retries:
+                    self.sleep(1.0 * (2 ** (attempt - 1)))
+
+        log = NotificationLog(
+            event_id=None,
+            channel="feishu",
+            payload=payload if self.webhook else None,
+            response=body,
+            status="success" if ok else "failed",
+            retry_count=max(0, attempts - 1),
+        )
+        session.add(log)
+        session.commit()
+        return log

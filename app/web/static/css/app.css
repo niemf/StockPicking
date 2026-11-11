@@ -1542,6 +1542,35 @@ select:focus {
   color: var(--muted);
 }
 
+.premarket-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.premarket-section h2 {
+  font-size: 15px;
+}
+
+.briefing-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.briefing-text {
+  margin: 0;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f7f9fc;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
 .flow-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

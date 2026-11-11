@@ -198,6 +198,26 @@ def test_report_card_api_reports_missing(client) -> None:
     assert bad.status_code == 404
 
 
+def test_premarket_preview_api(client) -> None:
+    response = client.get("/api/premarket")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["sections"]
+    assert data["date"]
+    assert "【昨日复盘】" in data["text"]
+
+    bad = client.get("/api/premarket?day=2026-13-01")
+    assert bad.status_code == 400
+
+
+def test_premarket_page_renders(client) -> None:
+    response = client.get("/premarket")
+    assert response.status_code == 200
+    assert "盘前简报" in response.text
+    assert "推送到飞书" in response.text
+    assert "纪律提醒" in response.text
+
+
 def test_stock_detail_renders_report_panel(client, monkeypatch) -> None:
     from app.providers.base import Quote
 

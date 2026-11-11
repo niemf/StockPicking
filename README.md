@@ -10,6 +10,7 @@ A 股主板价格监控与 AI 复盘系统（个人自用）。
 - **自定义组合预警**：价格 / 涨跌幅 / 成交额 / 换手率任意组合，支持 AND/OR、每日次数上限、到期日、按规则选择飞书 / 邮件 / 两者。
 - **自选股分组与标签**：分组筛选、标签、拼音与首字母搜索、批量导入（`代码,分组,备注,标签`）、CSV 导出。
 - **结构化 AI 研报卡**：个股页一键生成结论 / 评分 / 趋势 / 支撑压力 / 风险 / 催化 / 操作清单，同一交易日缓存，重复点击不重复计费。
+- **盘前简报（08:45）**：昨日复盘 3 条 + 贴近建仓区的自选 + 全部自选关键价位 + 纪律提醒，零 AI 调用，可一键推送飞书。
 - **持仓默认隐藏**：模块代码保留，`FEATURE_HOLDINGS=false` 时导航与仪表盘不显示持仓面板。
 
 ### 数据源验证结论（2026-11-10）
@@ -67,6 +68,7 @@ TradeAI/
 │   │   ├── ai.py               # DeepSeek 客户端 + 预算 + 调用日志
 │   │   ├── plans.py            # AI 计划生成 / 校验 / 人工确认
 │   │   ├── report_card.py      # AI 个股研报卡（结论/评分/价位/清单）
+│   │   ├── premarket.py        # 盘前简报（零 AI，昨日复盘 + 关键价位）
 │   │   └── review.py           # 每日复盘（确定性摘要 + AI 叙述）
 │   ├── analysis/
 │   │   ├── context.py          # 单股上下文 + 惰性指标缓存
@@ -87,12 +89,14 @@ TradeAI/
 │   ├── discover.py             # 全市场技术面发现
 │   ├── generate_plans.py       # 为候选生成 AI 交易计划
 │   ├── daily_review.py         # 生成每日复盘
+│   ├── premarket.py            # 盘前简报：打印 / 推送飞书（08:45）
 │   ├── daily_update.py         # 盘后：增量日线 + 发现（可挂计划任务）
 │   ├── verify_quotes.py        # 腾讯/新浪实时行情验证
 │   ├── verify_akshare.py       # AkShare 日线/财务/公告验证
 │   ├── verify_feishu.py        # 飞书通知验证
 │   ├── fetch_vendor.py         # 下载 ECharts / HTMX 到本地
 │   ├── run.ps1                 # 启动开发服务器
+│   ├── restart.ps1             # 杀掉旧进程后重启（改路由后必用）
 │   └── verify_all.ps1          # 一键跑全部数据源验证
 ├── tests/
 │   ├── test_providers.py       # 行情解析 + 批量抓取 + 降级测试
@@ -104,6 +108,7 @@ TradeAI/
 │   ├── test_custom_rules.py    # 自定义组合预警 / 上限 / 渠道测试
 │   ├── test_watchlist_groups.py# 分组 / 标签 / 拼音搜索 / 导入 / 迁移测试
 │   ├── test_report_card.py     # 研报卡载荷 / 校验夹取 / 缓存测试
+│   ├── test_premarket.py       # 盘前简报分段 / 距离 / 推送测试
 │   ├── test_analysis.py        # 指标 / 因子 / 漏斗测试
 │   ├── test_discovery.py       # 发现编排 / 日线存储 / 幂等测试
 │   ├── test_ai.py              # AI 客户端 / 预算 / 计划校验 / 复盘测试
@@ -143,6 +148,8 @@ Copy-Item .env.example .env
 & 'D:\MyProject\TradeAI\.venv\python.exe' -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
+> Windows 上 `--reload` 偶发“显示 Reloading 但旧进程仍在服务”（模板会更新、路由不更新）。改了 `app/**/*.py` 后如果页面还是旧的，用 `powershell -ExecutionPolicy Bypass -File scripts\restart.ps1` 强制重启。
+
 打开 <http://127.0.0.1:8000>。
 
 页面：
@@ -155,6 +162,7 @@ Copy-Item .env.example .env
 - `/plans` AI 交易计划（生成 / 确认 / 拒绝）
 - `/alerts` 预警（规则、事件、自定义组合规则）
 - `/reports` 每日复盘
+- `/premarket` 盘前简报（预览 + 推送飞书）
 
 功能开关（`.env`）：
 
@@ -355,6 +363,29 @@ curl.exe "http://127.0.0.1:8000/api/reports/600036"
 curl.exe "http://127.0.0.1:8000/api/reports?limit=20"
 ```
 
+## 盘前简报（08:45）
+
+盘后复盘看“今天发生了什么”，盘前简报看“今天该盯什么”。全部由本地数据生成，**不调用 AI**：
+
+- 昨日复盘 3 条：市场风格与指数、板块资金、龙虎榜（取昨日复盘已存摘要）。
+- 今日关注：把自选里已确认计划的股票按“距建仓区远近”排序，进入建仓区或距离 ≤3% 的排前面。
+- 自选关键价位：建仓区间、止损、止盈，价格取最近一根日线收盘。
+- 纪律提醒：不追高开、跌破止损执行、单票 ≤15%，附当前风格仓位建议。
+
+```powershell
+# 只打印
+& '.venv\python.exe' scripts\premarket.py
+
+# 推送飞书（非交易日自动跳过，--force 强制）
+& '.venv\python.exe' scripts\premarket.py --send
+
+# 指定日期 / 输出 JSON
+& '.venv\python.exe' scripts\premarket.py --date 2026-11-12
+& '.venv\python.exe' scripts\premarket.py --json
+```
+
+页面：`/premarket` 可预览全文并一键推送；接口 `GET /api/premarket?day=YYYY-MM-DD`、`POST /api/premarket/send?force=false`。推送结果写入 `notification_log`（`event_id` 为空表示这是简报而不是预警）。
+
 ## AI 使用与成本
 
 | 控制项 | 实现 |
@@ -373,7 +404,7 @@ curl.exe "http://127.0.0.1:8000/api/reports?limit=20"
 & '.venv\python.exe' -m pytest
 ```
 
-当前 109 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排、板块资金/龙虎榜解析、AI 预算/计划校验/研报卡/复盘。
+当前 115 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、全市场发现编排、板块资金/龙虎榜解析、AI 预算/计划校验/研报卡/复盘、盘前简报分段与推送。
 
 ## 数据源验证
 

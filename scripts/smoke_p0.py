@@ -26,7 +26,7 @@ def check(label: str, ok: bool, detail: str = "") -> None:
 def main() -> int:
     with httpx.Client(base_url=BASE, timeout=120.0, follow_redirects=False) as client:
         pages: dict[str, str] = {}
-        for path in ["/", "/watchlist", "/alerts", "/candidates", "/plans", "/reports"]:
+        for path in ["/", "/watchlist", "/alerts", "/candidates", "/plans", "/reports", "/premarket"]:
             response = client.get(path)
             check(f"GET {path}", response.status_code == 200, f"status={response.status_code}")
             pages[path] = response.text
@@ -51,6 +51,11 @@ def main() -> int:
             "GET /api/reports/600036",
             report_api.status_code == 200,
             report_api.text[:120],
+        )
+        check("premarket page", "盘前简报" in pages["/premarket"])
+        check(
+            "premarket sections",
+            "昨日复盘" in pages["/premarket"] and "纪律提醒" in pages["/premarket"],
         )
 
         sentiment = client.get("/api/market/sentiment")
