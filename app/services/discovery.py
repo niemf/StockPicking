@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 from loguru import logger
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.analysis.context import StockContext, StockMeta
@@ -117,6 +117,7 @@ def _persist_result(
         snapshot["price_at_discovery"] = item.get("price")
         snapshot["pct_chg_at_discovery"] = item.get("pct_chg")
         snapshot["industry"] = item.get("industry")
+        snapshot["risk"] = item.get("risk")
         session.add(
             Candidate(
                 trade_date=trade_date,
@@ -142,6 +143,41 @@ def _persist_result(
     )
     session.add(job)
     session.commit()
+
+
+def bars_freshness(
+    session: Session,
+    *,
+    today: date,
+    moment: datetime | None = None,
+) -> dict[str, Any]:
+    """Compare the newest stored daily bar with the newest *expected* one.
+
+    Discovery happily appends today's live quote to whatever the last stored
+    bar is. If a whole session is missing, every moving average and every
+    volume ratio is silently wrong, so the funnel reports it instead of
+    pretending the data is complete.
+    """
+    latest = session.scalar(select(func.max(DailyBar.trade_date)))
+    if latest is None:
+        return {"bars_latest": None, "expected_bar_date": None, "bars_stale": True, "bars_stale_days": None}
+
+    moment = moment or datetime.now()
+    session_name = market_session(moment)
+    dates = open_dates(session)
+    # Before the close, today's bar is not written yet; the live quote is merged
+    # into the frame at analysis time instead.
+    usable = [day for day in dates if day < today] if session_name != "after_close" else [
+        day for day in dates if day <= today
+    ]
+    expected = max(usable) if usable else None
+    missed = [day for day in usable if latest < day <= (expected or latest)]
+    return {
+        "bars_latest": latest.isoformat(),
+        "expected_bar_date": expected.isoformat() if expected else None,
+        "bars_stale": expected is not None and latest < expected,
+        "bars_stale_days": len(missed),
+    }
 
 
 def run_discovery(
@@ -206,6 +242,16 @@ def run_discovery(
         "total_sec": round(elapsed, 2),
         "trade_date": today.isoformat(),
     }
+    freshness = bars_freshness(session, today=today, moment=moment)
+    extra.update(freshness)
+    if freshness["bars_stale"]:
+        logger.warning(
+            "daily bars are stale: latest={} expected={} ({} sessions missing); "
+            "indicators may be wrong — run scripts/backfill_bars.py --incremental",
+            freshness["bars_latest"],
+            freshness["expected_bar_date"],
+            freshness["bars_stale_days"],
+        )
     if persist:
         _persist_result(session, result, trade_date=today, moment=moment, extra_stats=extra)
 
@@ -248,6 +294,7 @@ def latest_job(session: Session) -> JobRun | None:
 
 
 __all__ = [
+    "bars_freshness",
     "build_contexts",
     "latest_candidates",
     "latest_job",

@@ -208,8 +208,12 @@ def _breakout_20d(ctx: StockContext, cfg: dict) -> Reason:
     if high20 is None or high20 <= 0:
         return "日线不足"
     ratio = ctx.price / high20
-    if ratio < float(cfg.get("min_ratio", 0.97)):
-        return f"距 20 日新高 {ratio * 100:.1f}%"
+    min_ratio = float(cfg.get("min_ratio", 0.97))
+    if ratio < min_ratio:
+        # Bucket the ratio so the funnel shows a handful of rows instead of one
+        # row per distinct percentage.
+        bucket = int(ratio * 100 // 5 * 5)
+        return f"距 20 日新高 {bucket}%–{bucket + 5}%"
     return None
 
 
@@ -281,6 +285,123 @@ def _gap_down(ctx: StockContext, cfg: dict) -> Reason:
         return "日线不足"
     if gap < float(cfg.get("max_pct", -5.0)):
         return "大幅低开"
+    return None
+
+
+@hard_filter(
+    "extension",
+    5,
+    "MA20 乖离",
+    requires=("ma20",),
+    order=5,
+)
+def _extension(ctx: StockContext, cfg: dict) -> Reason:
+    """Reject late-stage entries: the further above MA20, the worse the stop."""
+    ma20 = ctx.feature("ma20")
+    if not ma20:
+        return "日线不足"
+    deviation = (ctx.price / ma20 - 1) * 100
+    limit = float(cfg.get("max_deviation_pct", 8.0))
+    if deviation > limit:
+        return f"乖离 MA20 超过 {limit:.0f}%"
+    return None
+
+
+@hard_filter(
+    "run_up",
+    5,
+    "短期涨幅与连涨",
+    requires=("ret5", "up_streak"),
+    order=15,
+)
+def _run_up(ctx: StockContext, cfg: dict) -> Reason:
+    ret5 = ctx.feature("ret5")
+    streak = ctx.feature("up_streak") or 0
+    if ret5 is not None and ret5 > float(cfg.get("max_ret5_pct", 20.0)):
+        return "5 日涨幅过大"
+    if streak >= int(cfg.get("max_up_streak", 5)):
+        return f"连涨 ≥{int(cfg.get('max_up_streak', 5))} 天"
+    return None
+
+
+@hard_filter(
+    "upper_shadow",
+    5,
+    "长上影派发",
+    requires=("upper_shadow_pct", "volume_ratio"),
+    order=25,
+)
+def _upper_shadow(ctx: StockContext, cfg: dict) -> Reason:
+    """Repeated long upper shadows on volume = supply hitting the offer."""
+    lookback = int(cfg.get("lookback", 3))
+    max_shadow = float(cfg.get("max_shadow_pct", 4.0))
+    min_ratio = float(cfg.get("min_volume_ratio", 1.5))
+    min_hits = int(cfg.get("min_hits", 1))
+    hits = 0
+    for offset in range(lookback):
+        shadow = ctx.feature("upper_shadow_pct", offset)
+        ratio = ctx.feature("volume_ratio", offset)
+        if shadow is None:
+            continue
+        if shadow > max_shadow and (ratio or 0.0) > min_ratio:
+            hits += 1
+    if hits >= min_hits:
+        return f"近 {lookback} 日长上影放量 {hits} 次"
+    return None
+
+
+@hard_filter(
+    "stagnation",
+    5,
+    "放量滞涨",
+    requires=("volume_ratio", "close_position"),
+    order=35,
+)
+def _stagnation(ctx: StockContext, cfg: dict) -> Reason:
+    """Heavy volume that closes in the lower half of the day's range."""
+    ratio = ctx.feature("volume_ratio")
+    position = ctx.feature("close_position")
+    if ratio is None or position is None:
+        return "日线不足"
+    if ratio > float(cfg.get("min_volume_ratio", 2.5)) and position < float(
+        cfg.get("max_close_position", 0.5)
+    ):
+        return f"量比 {ratio:.1f} 但收盘位于日内下半区"
+    return None
+
+
+@hard_filter(
+    "overhead",
+    5,
+    "上方压力",
+    requires=("high20_prev", "high60_prev"),
+    order=45,
+)
+def _overhead(ctx: StockContext, cfg: dict) -> Reason:
+    """Too little room to the next real level.
+
+    A stock that has already cleared its 20-day high is *making* the new high,
+    so the next reference is the 60-day high. A stock still under the 20-day
+    high has that high as resistance, and if it is close, the reward half of
+    the reward-risk ratio is already gone.
+    """
+    min_room = float(cfg.get("min_room_pct", 3.0))
+    high20 = ctx.feature("high20_prev")
+    high60 = ctx.feature("high60_prev")
+    if high20 is None or high20 <= 0:
+        return "日线不足"
+
+    if ctx.price < high20:
+        room = (high20 / ctx.price - 1) * 100
+        if room < min_room:
+            return f"距 20 日高点仅 {room:.1f}%"
+        return None
+
+    if high60 is None or high60 <= 0:
+        return None  # new 60-day high: open space
+    room = (high60 / ctx.price - 1) * 100
+    if room < float(cfg.get("min_room_pct_above_high", 0.0)):
+        return f"距 60 日高点仅 {room:.1f}%"
     return None
 
 

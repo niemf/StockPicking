@@ -6,7 +6,7 @@
     <p class="eyebrow">DISCOVERY</p>
     <h1>候选池</h1>
     <p class="subtitle">
-      全主板分层筛选：基础池 → 流动性 → 趋势 → 量价 → 动量与风险 → 综合评分。
+      全主板分层筛选：基础池 → 流动性 → 趋势 → 量价 → 动量与风险 → 盈亏比闸门。
       {% if trade_date %}最近一次：{{ trade_date }}{% else %}还没有运行过全市场发现{% endif %}
     </p>
   </div>
@@ -28,6 +28,12 @@
 
 {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 {% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+{% if stats and stats.bars_stale %}
+<div class="flash flash-error">
+  日线数据过期：最新 {{ stats.bars_latest }}，应为 {{ stats.expected_bar_date }}（缺 {{ stats.bars_stale_days }} 个交易日）。
+  指标与盈亏比可能失真，请先运行 <code>scripts\backfill_bars.py --incremental</code>，再重新发现。
+</div>
+{% endif %}
 
 {% if stats %}
 <section class="stat-grid">
@@ -44,7 +50,7 @@
   <article class="stat-card">
     <span class="stat-label">最终候选</span>
     <strong class="stat-value">{{ stats.candidates }}</strong>
-    <span class="stat-sub">按综合评分取前 {{ stats.candidates }} 名</span>
+    <span class="stat-sub">通过盈亏比闸门后按 评分 + 盈亏比 排序</span>
   </article>
   <article class="stat-card">
     <span class="stat-label">总耗时</span>
@@ -99,11 +105,13 @@
           <th>股票</th>
           <th>现价 / 涨跌</th>
           <th>评分</th>
+          <th>盈亏比</th>
           <th>趋势</th>
           <th>量价</th>
           <th>动量</th>
           <th>相对强度</th>
           <th>波动</th>
+          <th>买点 / 止损 / 目标</th>
           <th>关键指标</th>
           <th></th>
         </tr>
@@ -123,6 +131,11 @@
             <small class="{{ item.trend }}">{{ item.pct_chg | pct }}</small>
           </td>
           <td><span class="score-badge">{{ '%.1f' | format(item.score) }}</span></td>
+          <td>
+            {% if item.rr %}
+            <span class="rr-badge {{ 'rr-good' if item.rr >= 2.5 else 'rr-ok' }}">{{ '%.2f' | format(item.rr) }}</span>
+            {% else %}<small>—</small>{% endif %}
+          </td>
           {% for key in ['trend', 'volume_price', 'momentum', 'relative_strength', 'volatility'] %}
           <td class="score-cell">
             {% set value = item.breakdown.get(key, 0) %}
@@ -130,6 +143,14 @@
             <small>{{ '%.0f' | format(value) }}</small>
           </td>
           {% endfor %}
+          <td>
+            {% if item.risk %}
+            <small>
+              买 {{ item.risk.entry | price }} · 损 {{ item.risk.stop | price }}（{{ '%.1f' | format(item.risk.stop_pct) }}%）<br>
+              目标 {{ item.risk.target1 | price }}（+{{ '%.1f' | format(item.risk.upside_pct) }}%）· 压力 {{ item.risk.resistance | price }}
+            </small>
+            {% else %}<small>—</small>{% endif %}
+          </td>
           <td>
             <small>
               MA20 {{ item.snapshot.ma20 | num2 }} · 量比 {{ item.snapshot.volume_ratio | num2 }}<br>

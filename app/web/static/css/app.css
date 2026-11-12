@@ -2309,7 +2309,27 @@ select:focus {
 }
 
 .candidates-table {
-  min-width: 1040px;
+  min-width: 1180px;
+}
+
+.rr-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.rr-badge.rr-good {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.rr-badge.rr-ok {
+  background: #fef3c7;
+  color: #b45309;
 }
 
 .rank-badge {

@@ -70,6 +70,33 @@ filters:
     enabled: true
     max_pct: -5.0
 
+  # 位置风险：趋势再强，买在拉升末端也很难赚钱。
+  extension:
+    enabled: true
+    max_deviation_pct: 8.0   # 收盘价高于 MA20 超过 8% 即为追高
+
+  run_up:
+    enabled: true
+    max_ret5_pct: 20.0       # 5 日涨幅上限
+    max_up_streak: 5         # 连涨天数上限
+
+  upper_shadow:
+    enabled: true
+    lookback: 3              # 最近 3 个交易日
+    max_shadow_pct: 4.0      # 上影线超过 4%
+    min_volume_ratio: 1.5    # 且放量
+    min_hits: 1              # 出现 1 次即排除
+
+  stagnation:
+    enabled: true
+    min_volume_ratio: 2.5    # 量比 > 2.5
+    max_close_position: 0.5  # 收盘在当日振幅下半区
+
+  overhead:
+    enabled: false           # 是否"贴着前高"已由盈亏比闸门的目标空间负责判断
+    min_room_pct: 3.0        # 未突破前，距 20 日高点至少 3%
+    min_room_pct_above_high: 0.0   # 已创新高时不限制
+
 scoring:
   trend:
     weight: 30
@@ -84,5 +111,18 @@ scoring:
     weight: 10
     ideal_atr_pct: 3.0
 
+# 盈亏比闸门：程序算买点 / 止损 / 目标，RR 不足直接丢弃。
+risk:
+  enabled: true
+  atr_mult: 1.2            # 止损 = 收盘 − 1.2×ATR（与 MA20 取更远者）
+  ma20_buffer: 0.01        # MA20 × 0.99 作为结构止损
+  min_stop_pct: 1.5        # 止损太近易被噪音扫掉
+  max_stop_pct: 8.0        # 止损太宽则单笔风险过大
+  min_upside_pct: 3.0      # 目标空间下限
+  max_target_pct: 25.0     # 目标空间上限（超出按上限）
+  min_reward_risk: 2.0     # 盈亏比下限
+  target2_extension: 1.618 # 第二目标 = 第一目标空间 × 1.618
+  rr_bonus_cap: 10.0       # 盈亏比带来的排序加分上限
+
 output:
-  top_n: 30
+  top_n: 15

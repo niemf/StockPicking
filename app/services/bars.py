@@ -20,6 +20,8 @@ from app.config import settings
 from app.db.models import DailyBar
 from app.providers.akshare_provider import AkShareProvider
 from app.providers.base import Quote
+from app.providers.sina import SinaProvider
+from app.providers.tencent import TencentProvider
 
 UPSERT_CHUNK = 90  # 10 columns * 90 rows stays below SQLite's variable limit
 BAR_COLUMNS = (
@@ -167,16 +169,54 @@ def coverage(session: Session, codes: list[str] | None = None) -> dict[str, tupl
     }
 
 
-def _fetch_one(provider: AkShareProvider, code: str, start: date, end: date) -> pd.DataFrame:
-    last_error: Exception | None = None
-    for attempt in range(3):
+def _fetch_one(
+    provider: AkShareProvider,
+    fallbacks: list,
+    code: str,
+    start: date,
+    end: date,
+    state: dict,
+) -> pd.DataFrame:
+    """Fetch one stock; fall back to Tencent/Sina when Eastmoney rate-limits us."""
+    if not state["use_fallback"]:
+        last_error: Exception | None = None
+        for attempt in range(2):
+            try:
+                time.sleep(0.02)
+                frame = provider.get_daily_bars(code, start=start, end=end)
+                state["ak_failures"] = 0
+                if frame is not None and not frame.empty:
+                    return frame
+            except Exception as exc:  # noqa: BLE001 - retry transient provider errors
+                last_error = exc
+                state["ak_failures"] += 1
+                time.sleep(0.3 * (attempt + 1))
+        if state["ak_failures"] >= 15:
+            state["use_fallback"] = True
+            logger.warning(
+                "akshare failed {} times in a row (last: {}); switching to fallback providers",
+                state["ak_failures"],
+                last_error,
+            )
+
+    errors: list[str] = []
+    for fallback in fallbacks:
+        if fallback.name in state["down"]:
+            continue
         try:
-            time.sleep(0.05)
-            return provider.get_daily_bars(code, start=start, end=end)
-        except Exception as exc:  # noqa: BLE001 - retry transient provider errors
-            last_error = exc
-            time.sleep(0.4 * (attempt + 1))
-    raise RuntimeError(f"{code}: {last_error}")
+            frame = fallback.get_daily_bars(code, start=start, end=end)
+            if frame is not None and not frame.empty:
+                state["strikes"][fallback.name] = 0
+                return frame
+            raise RuntimeError("no rows returned")
+        except Exception as exc:  # noqa: BLE001 - try the next provider
+            errors.append(f"{fallback.name}: {exc}")
+            strikes = state["strikes"].get(fallback.name, 0) + 1
+            state["strikes"][fallback.name] = strikes
+            if strikes >= 10:
+                state["down"].add(fallback.name)
+                logger.warning("fallback provider {} disabled for this batch: {}", fallback.name, exc)
+    raise RuntimeError(f"{code}: " + ("; ".join(errors) or "no rows returned"))
 
 
 def _run_batch(
@@ -189,11 +229,16 @@ def _run_batch(
     label: str,
 ) -> dict:
     provider = AkShareProvider()
+    fallbacks = [TencentProvider(), SinaProvider()]
+    state = {"ak_failures": 0, "use_fallback": False, "strikes": {}, "down": set()}
     stats = {"requested": len(codes), "written": 0, "failed": []}
     started = time.perf_counter()
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_fetch_one, provider, code, start, end): code for code in codes}
+        futures = {
+            pool.submit(_fetch_one, provider, fallbacks, code, start, end, state): code
+            for code in codes
+        }
         for index, future in enumerate(as_completed(futures), start=1):
             code = futures[future]
             try:

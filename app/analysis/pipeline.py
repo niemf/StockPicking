@@ -7,7 +7,7 @@ The funnel is intentionally ordered from cheap to expensive:
     3. trend (needs daily bars)
     4. volume + breakout
     5. momentum / volatility / risk
-    6. weighted score -> top N
+    6. reward-risk gate -> weighted score -> top N
 
 Every stage records how many stocks it rejected and why. A stock that fails an
 early test never loads bars nor computes a feature.
@@ -26,6 +26,7 @@ import yaml
 
 from app.analysis.context import StockContext
 from app.analysis.factors import FILTERS, SCORERS
+from app.analysis.risk import build_plan, rr_bonus
 
 PROFILE_DIR = Path(__file__).resolve().parent / "profiles"
 DEFAULT_PROFILE_PATH = PROFILE_DIR / "default.yaml"
@@ -96,6 +97,7 @@ STAGE_NAMES = {
     3: "趋势结构",
     4: "量价与突破",
     5: "动量与风险",
+    6: "盈亏比闸门",
 }
 
 
@@ -183,7 +185,7 @@ def run_pipeline(
         for ctx, percentile in zip(survivors, percentiles.tolist()):
             ctx.extras["rs_percentile"] = percentile
 
-    scored: list[tuple[float, StockContext, dict[str, float]]] = []
+    scored: list[tuple[float, float, StockContext, dict[str, float], object]] = []
     weights = {
         key: float(config.get("weight", 0))
         for key, config in scoring_cfg.items()
@@ -203,7 +205,35 @@ def run_pipeline(
             breakdown[key] = round(score, 2)
             weighted += score * weight
         ctx.extras["score_breakdown"] = breakdown
-        scored.append((weighted / total_weight, ctx, breakdown))
+        scored.append((weighted / total_weight, weighted / total_weight, ctx, breakdown, None))
+
+    # Stage 6: the reward-risk gate. A stock can be strong and still be a bad
+    # trade at today's price; this stage rewrites the ranking around "how much
+    # do I make if right versus lose if wrong".
+    risk_cfg = profile.get("risk", {}) or {}
+    if risk_cfg.get("enabled", True) and scored:
+        stage_started = time.perf_counter()
+        gate_rejections: dict[str, int] = {}
+        gated: list[tuple[float, float, StockContext, dict[str, float], object]] = []
+        for base_score, _, ctx, breakdown, _plan in scored:
+            plan, reason = build_plan(ctx, risk_cfg)
+            if plan is None:
+                label = reason or "无有效计划"
+                gate_rejections[label] = gate_rejections.get(label, 0) + 1
+                continue
+            bonus = rr_bonus(plan.rr, risk_cfg)
+            gated.append((base_score + bonus, base_score, ctx, breakdown, plan))
+        stages.append(
+            StageStat(
+                stage=6,
+                name=STAGE_NAMES[6],
+                input_count=len(scored),
+                passed=len(gated),
+                rejections=gate_rejections,
+                elapsed_ms=(time.perf_counter() - stage_started) * 1000,
+            )
+        )
+        scored = gated
 
     scored.sort(key=lambda item: item[0], reverse=True)
     selected = scored[:top_n]
@@ -215,7 +245,8 @@ def run_pipeline(
     ]
 
     candidates: list[dict] = []
-    for rank, (score, ctx, breakdown) in enumerate(selected, start=1):
+    for rank, (rank_score, base_score, ctx, breakdown, plan) in enumerate(selected, start=1):
+        risk = plan.as_dict() if plan is not None else None
         candidates.append(
             {
                 "rank": rank,
@@ -224,7 +255,10 @@ def run_pipeline(
                 "industry": ctx.meta.industry,
                 "price": round(ctx.price, 3),
                 "pct_chg": round(ctx.pct_chg, 2),
-                "score": round(score, 2),
+                "score": round(base_score, 2),
+                "rank_score": round(rank_score, 2),
+                "rr": round(plan.rr, 2) if plan is not None else None,
+                "risk": risk,
                 "rule_hits": passed_labels,
                 "score_breakdown": breakdown,
                 "indicator_snapshot": _snapshot(ctx),
@@ -251,8 +285,13 @@ def _snapshot(ctx: StockContext) -> dict:
         "rsi12",
         "macd_hist",
         "atr_pct",
+        "ret5",
         "ret20",
+        "up_streak",
         "high20_prev",
+        "high60_prev",
+        "resistance_dist",
+        "upper_shadow_pct",
         "drawdown20",
         "close_position",
     )

@@ -91,6 +91,33 @@ def _breakout_levels(df: pd.DataFrame) -> dict[str, pd.Series]:
     return {"high20": rolled, "high20_prev": rolled.shift(1)}
 
 
+@feature_builder(
+    "overhead",
+    provides=("high60_prev", "low20", "range20_pct", "resistance_dist"),
+)
+def _overhead(df: pd.DataFrame) -> dict[str, pd.Series]:
+    """Nearest overhead level and the 20-day range (measured-move target).
+
+    ``resistance_dist`` is the distance to the closest level above the current
+    close: the 20-day high first, then the 60-day high. It is deliberately
+    conservative — a stock sitting right under its prior high has little room,
+    which is exactly what the risk gate should reject.
+    """
+    close = df["close"]
+    high20 = df["high"].rolling(20).max()
+    low20 = df["low"].rolling(20).min()
+    high20_prev = high20.shift(1)
+    high60_prev = df["high"].rolling(60).max().shift(1)
+    resistance = high20_prev.where(high20_prev > close, high60_prev)
+    resistance = resistance.where(resistance > close)
+    return {
+        "high60_prev": high60_prev,
+        "low20": low20,
+        "range20_pct": (high20 - low20) / close * 100,
+        "resistance_dist": (resistance / close - 1) * 100,
+    }
+
+
 # ------------------------------------------------------------------ momentum
 @feature_builder("macd", provides=("macd_dif", "macd_dea", "macd_hist"))
 def _macd(df: pd.DataFrame) -> dict[str, pd.Series]:
@@ -120,6 +147,18 @@ def _returns(df: pd.DataFrame) -> dict[str, pd.Series]:
     return {
         "pct_chg": close.pct_change() * 100,
         "ret20": close.pct_change(20) * 100,
+    }
+
+
+@feature_builder("short_momentum", provides=("ret5", "up_streak"))
+def _short_momentum(df: pd.DataFrame) -> dict[str, pd.Series]:
+    close = df["close"]
+    up = close > close.shift(1)
+    groups = (~up).cumsum()
+    streak = up.astype(int).groupby(groups).cumsum()
+    return {
+        "ret5": close.pct_change(5) * 100,
+        "up_streak": streak,
     }
 
 
@@ -165,12 +204,20 @@ def _volume(df: pd.DataFrame) -> dict[str, pd.Series]:
 # ------------------------------------------------------------------ shape
 @feature_builder(
     "candle_shape",
-    provides=("close_position", "gap_pct", "limit_up_streak"),
+    provides=(
+        "close_position",
+        "gap_pct",
+        "limit_up_streak",
+        "upper_shadow_pct",
+        "lower_shadow_pct",
+    ),
     deps=("returns",),
 )
 def _candle_shape(df: pd.DataFrame) -> dict[str, pd.Series]:
     price_range = (df["high"] - df["low"]).replace(0, np.nan)
     prev_close = df["close"].shift(1)
+    body_top = df[["open", "close"]].max(axis=1)
+    body_bottom = df[["open", "close"]].min(axis=1)
     limit_up = df["pct_chg"] >= 9.7
     streak = limit_up.astype(int)
     # Run length of consecutive limit-ups ending at each row.
@@ -180,6 +227,8 @@ def _candle_shape(df: pd.DataFrame) -> dict[str, pd.Series]:
         "close_position": (df["close"] - df["low"]) / price_range,
         "gap_pct": (df["open"] - prev_close) / prev_close * 100,
         "limit_up_streak": streak,
+        "upper_shadow_pct": (df["high"] - body_top) / df["close"] * 100,
+        "lower_shadow_pct": (body_bottom - df["low"]) / df["close"] * 100,
     }
 
 

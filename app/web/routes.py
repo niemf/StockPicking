@@ -910,6 +910,7 @@ def candidates(request: Request, db: Session = Depends(get_db)):
         price = quote.price if quote else snapshot.get("price_at_discovery")
         pct_chg = quote.pct_chg if quote else snapshot.get("pct_chg_at_discovery")
         breakdown = snapshot.get("score_breakdown") or {}
+        risk = snapshot.get("risk") or {}
         items.append(
             {
                 "rank": row.rank,
@@ -922,6 +923,8 @@ def candidates(request: Request, db: Session = Depends(get_db)):
                 "trend": _trend_class(pct_chg),
                 "breakdown": breakdown,
                 "snapshot": snapshot,
+                "risk": risk,
+                "rr": risk.get("rr"),
                 "rule_hits": (row.rule_hits or [])[:6],
             }
         )
