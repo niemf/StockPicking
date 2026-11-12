@@ -279,6 +279,7 @@ def _snapshot(ctx: StockContext) -> dict:
         "ma5",
         "ma10",
         "ma20",
+        "ma30",
         "ma60",
         "ma20_slope3",
         "volume_ratio",
@@ -299,6 +300,8 @@ def _snapshot(ctx: StockContext) -> dict:
         key: (round(value, 4) if (value := ctx.feature(key)) is not None else None)
         for key in keys
     }
+    ma20 = snapshot.get("ma20")
+    snapshot["dev20"] = round((ctx.price / ma20 - 1) * 100, 2) if ma20 else None
     snapshot.update(
         {
             "amount": round(ctx.amount, 2),

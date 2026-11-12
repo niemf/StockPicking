@@ -37,6 +37,38 @@ BAR_COLUMNS = (
     "turnover_rate",
     "adj_factor",
 )
+BAR_CHUNK = 400
+
+
+def load_bars_map(session: Session, codes: list[str]) -> dict[str, pd.DataFrame]:
+    """Load bars for many stocks in bounded chunks (one query per chunk)."""
+    result: dict[str, pd.DataFrame] = {}
+    columns = (
+        DailyBar.code,
+        DailyBar.trade_date,
+        DailyBar.open,
+        DailyBar.high,
+        DailyBar.low,
+        DailyBar.close,
+        DailyBar.volume,
+        DailyBar.amount,
+        DailyBar.turnover_rate,
+    )
+    for start in range(0, len(codes), BAR_CHUNK):
+        chunk = codes[start : start + BAR_CHUNK]
+        statement = (
+            select(*columns)
+            .where(DailyBar.code.in_(chunk))
+            .order_by(DailyBar.code, DailyBar.trade_date)
+        )
+        # pandas' reader is roughly twice as fast as building the frame from
+        # SQLAlchemy Row tuples for ~100k rows.
+        frame = pd.read_sql_query(statement, session.connection())
+        if frame.empty:
+            continue
+        for code, group in frame.groupby("code", sort=False):
+            result[str(code)] = group.reset_index(drop=True)
+    return result
 
 
 def _as_float(value, default: float | None = None) -> float | None:

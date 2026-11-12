@@ -82,6 +82,7 @@ TradeAI/
 │   │   ├── tech_snapshot.py    # 技术诊断：均线/量能/支撑压力 + 看多看空评分
 │   │   ├── industries.py       # 全市场行业分类（Baostock 批量，短标签）
 │   │   ├── announcements.py    # 巨潮公告抓取与分类（按日缓存）
+│   │   ├── indicators.py       # 指标落库：日线快照 + 周线聚合
 │   │   └── review.py           # 每日复盘（确定性摘要 + AI 叙述）
 │   ├── analysis/
 │   │   ├── context.py          # 单股上下文 + 惰性指标缓存
@@ -107,6 +108,7 @@ TradeAI/
 │   ├── sync_universe.py        # 同步全主板股票列表与上市日期
 │   ├── sync_industries.py      # 同步全市场行业分类（Baostock）
 │   ├── backfill_bars.py        # 日线回补 / 增量更新
+│   ├── build_indicators.py     # 重建 indicator_daily / weekly_bar
 │   ├── discover.py             # 全市场技术面发现
 │   ├── generate_plans.py       # 为候选生成 AI 交易计划
 │   ├── daily_review.py         # 生成每日复盘
@@ -140,6 +142,7 @@ TradeAI/
 │   ├── test_announcements.py   # 公告解析 / 分类 / 缓存 / 降级测试
 │   ├── test_analysis.py        # 指标 / 因子 / 漏斗测试
 │   ├── test_risk.py            # 盈亏比闸门 / 位置风险特征 / 新过滤器
+│   ├── test_indicators.py      # 指标落库 / 周线聚合 / 趋势判定
 │   ├── test_discovery.py       # 发现编排 / 日线存储 / 幂等测试
 │   ├── test_ai.py              # AI 客户端 / 预算 / 计划校验 / 复盘测试
 │   └── test_web.py             # 表单增删改 HTTP 流程测试
@@ -402,6 +405,30 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 & '.venv\python.exe' scripts\backfill_bars.py --incremental
 ```
 
+### 指标表（日线 / 周线）
+
+每天收盘后把算好的指标落库，后续选股、个股页、回测直接查表，不用再逐只重算 200 根 K 线：
+
+| 表 | 主键 | 内容 |
+|---|---|---|
+| `indicator_daily` | `(code, trade_date)` | MA5/10/20/30/60、MA20 斜率、量比、RSI12、MACD、ATR/ATR%、20 日高低与压力距离、20 日振幅、乖离相关字段、回撤、收盘位置、上/下影线、5 日/20 日涨幅、连涨天数 |
+| `weekly_bar` | `(code, week_end)` | 周开高低收、周成交量/额、周涨跌幅、周线 MA5/10/20/30、累计周数 |
+
+两张表都由 `app/analysis/features.py` 里同一套 `compute_features` 生成，和周中实时计算的口径完全一致，不会出现"表里一套、漏斗里一套"。
+
+```powershell
+# 全市场重建（首次约 3–6 分钟，之后每天只增量写最近 3 根）
+& '.venv\python.exe' scripts\build_indicators.py
+
+# 只重建最近 60 根 / 指定股票
+& '.venv\python.exe' scripts\build_indicators.py --days 60
+& '.venv\python.exe' scripts\build_indicators.py --codes 600000,000001
+```
+
+`scripts\daily_update.py` 已经把它串进盘后流程：写当日 K 线 → 重建最近 3 根日线指标 + 周线 → 跑全市场发现。
+
+周线在候选表里显示为「多头 / 空头 / 纠缠」，由 `load_weekly_map()` 从 `weekly_bar` 读取，不需要额外请求接口。
+
 ### 策略配置
 
 所有阈值和权重在 `app/analysis/profiles/default.yaml`：
@@ -560,7 +587,7 @@ curl.exe "http://127.0.0.1:8000/api/analysis?codes=600036,601318,002594"
 & '.venv\python.exe' -m pytest
 ```
 
-当前 172 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、技术诊断与看多看空评分、自选盘中信号（放量突破 / 分时强弱 / 买入信号 / 回踩 / 同股票合并推送）、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、盈亏比闸门与位置风险门槛、全市场发现编排与日线新鲜度、板块资金/龙虎榜/个股资金流多源降级、涨停梯队与席位解析、公告分类与缓存、AI 预算/计划校验/研报卡/复盘、盘前简报分段与推送。
+当前 183 个测试全部通过，覆盖行情解析与批量抓取、数据库约束、自选/持仓业务、分组/标签/拼音搜索与批量导入导出、技术诊断与看多看空评分、自选盘中信号（放量突破 / 分时强弱 / 买入信号 / 回踩 / 同股票合并推送）、市场情绪聚合与缓存、交易日历与盘中时段、预警状态机与自定义组合规则、飞书卡片与失败重试、技术指标/因子/漏斗、盈亏比闸门与位置风险门槛、全市场发现编排与日线新鲜度、指标落库与周线聚合、板块资金/龙虎榜/个股资金流多源降级、涨停梯队与席位解析、公告分类与缓存、AI 预算/计划校验/研报卡/复盘、盘前简报分段与推送。
 
 ## 数据源验证
 

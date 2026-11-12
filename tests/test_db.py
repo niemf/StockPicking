@@ -28,6 +28,7 @@ EXPECTED_TABLES = {
     "daily_bar",
     "quote",
     "indicator_daily",
+    "weekly_bar",
     "candidate",
     "watchlist",
     "holding",

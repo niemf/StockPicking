@@ -1113,6 +1113,12 @@ a.watch-card:hover {
   color: #0b7a3d;
 }
 
+.flash-warn {
+  border-color: #f5e0b3;
+  background: #fdf6e3;
+  color: #92580b;
+}
+
 .add-panel {
   margin-bottom: 20px;
   padding: 16px 18px;
@@ -2330,6 +2336,22 @@ select:focus {
 .rr-badge.rr-ok {
   background: #fef3c7;
   color: #b45309;
+}
+
+.week-trend {
+  font-weight: 700;
+}
+
+.week-trend.up {
+  color: #c62828;
+}
+
+.week-trend.down {
+  color: #2e7d32;
+}
+
+.week-trend.flat {
+  color: #6b7280;
 }
 
 .rank-badge {

@@ -34,6 +34,12 @@
   指标与盈亏比可能失真，请先运行 <code>scripts\backfill_bars.py --incremental</code>，再重新发现。
 </div>
 {% endif %}
+{% if stats and stats.indicators_stale %}
+<div class="flash flash-warn">
+  指标表未更新：`indicator_daily` 最新 {{ stats.indicators_latest or '空' }}，日线已到 {{ stats.bars_latest }}。
+  周线/指标查询会落后，可运行 <code>scripts\build_indicators.py</code>。
+</div>
+{% endif %}
 
 {% if stats %}
 <section class="stat-grid">
@@ -155,6 +161,12 @@
             <small>
               MA20 {{ item.snapshot.ma20 | num2 }} · 量比 {{ item.snapshot.volume_ratio | num2 }}<br>
               RSI12 {{ item.snapshot.rsi12 | num2 }} · ATR {{ item.snapshot.atr_pct | num2 }}%
+              {% if item.snapshot.weekly_trend %}
+              · 周线
+              <span class="week-trend {{ item.snapshot.weekly_trend }}">
+                {{ {'up': '多头', 'down': '空头', 'flat': '纠缠'}[item.snapshot.weekly_trend] }}
+              </span>
+              {% endif %}
             </small>
           </td>
           <td><a class="btn btn-ghost btn-xs" href="/stock/{{ item.code }}">分析 →</a></td>

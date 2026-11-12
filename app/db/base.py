@@ -105,6 +105,24 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "group_name": "VARCHAR(32) DEFAULT '默认'",
         "tags": "JSON",
     },
+    "indicator_daily": {
+        "close": "FLOAT",
+        "ma30": "FLOAT",
+        "ma20_slope3": "FLOAT",
+        "volume_ratio": "FLOAT",
+        "atr_pct": "FLOAT",
+        "high20_prev": "FLOAT",
+        "high60_prev": "FLOAT",
+        "resistance_dist": "FLOAT",
+        "range20_pct": "FLOAT",
+        "drawdown20": "FLOAT",
+        "close_position": "FLOAT",
+        "upper_shadow_pct": "FLOAT",
+        "lower_shadow_pct": "FLOAT",
+        "ret5": "FLOAT",
+        "ret20": "FLOAT",
+        "up_streak": "FLOAT",
+    },
 }
 
 

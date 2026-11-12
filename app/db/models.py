@@ -104,18 +104,26 @@ class Quote(Base):
 
 
 class IndicatorDaily(Base):
-    """每日技术指标快照，供预警与候选池复用。"""
+    """每日技术指标快照，供预警与候选池复用。
+
+    Written once after the close by ``app/services/indicators.py``; discovery
+    and the stock page read it instead of recomputing 200 bars per stock.
+    """
 
     __tablename__ = "indicator_daily"
 
     code: Mapped[str] = mapped_column(String(6), primary_key=True)
     trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    close: Mapped[float | None] = mapped_column(Float, default=None)
     ma5: Mapped[float | None] = mapped_column(Float, default=None)
     ma10: Mapped[float | None] = mapped_column(Float, default=None)
     ma20: Mapped[float | None] = mapped_column(Float, default=None)
+    ma30: Mapped[float | None] = mapped_column(Float, default=None)
     ma60: Mapped[float | None] = mapped_column(Float, default=None)
+    ma20_slope3: Mapped[float | None] = mapped_column(Float, default=None)
     vol_ma5: Mapped[float | None] = mapped_column(Float, default=None)
     vol_ma20: Mapped[float | None] = mapped_column(Float, default=None)
+    volume_ratio: Mapped[float | None] = mapped_column(Float, default=None)
     macd_dif: Mapped[float | None] = mapped_column(Float, default=None)
     macd_dea: Mapped[float | None] = mapped_column(Float, default=None)
     macd_hist: Mapped[float | None] = mapped_column(Float, default=None)
@@ -126,16 +134,54 @@ class IndicatorDaily(Base):
     boll_mid: Mapped[float | None] = mapped_column(Float, default=None)
     boll_lower: Mapped[float | None] = mapped_column(Float, default=None)
     atr14: Mapped[float | None] = mapped_column(Float, default=None)
+    atr_pct: Mapped[float | None] = mapped_column(Float, default=None)
     high20: Mapped[float | None] = mapped_column(Float, default=None)
+    high20_prev: Mapped[float | None] = mapped_column(Float, default=None)
     low20: Mapped[float | None] = mapped_column(Float, default=None)
-    high60: Mapped[float | None] = mapped_column(Float, default=None)
-    low60: Mapped[float | None] = mapped_column(Float, default=None)
+    high60_prev: Mapped[float | None] = mapped_column(Float, default=None)
+    resistance_dist: Mapped[float | None] = mapped_column(Float, default=None)
+    range20_pct: Mapped[float | None] = mapped_column(Float, default=None)
     support: Mapped[float | None] = mapped_column(Float, default=None)
     resistance: Mapped[float | None] = mapped_column(Float, default=None)
+    drawdown20: Mapped[float | None] = mapped_column(Float, default=None)
+    close_position: Mapped[float | None] = mapped_column(Float, default=None)
+    upper_shadow_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    lower_shadow_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    ret5: Mapped[float | None] = mapped_column(Float, default=None)
+    ret20: Mapped[float | None] = mapped_column(Float, default=None)
+    up_streak: Mapped[float | None] = mapped_column(Float, default=None)
     score: Mapped[float | None] = mapped_column(Float, default=None)
     tags: Mapped[list[str] | None] = mapped_column(JSON, default=None)
 
     __table_args__ = (Index("ix_indicator_daily_date", "trade_date"),)
+
+
+class WeeklyBar(Base):
+    """周线（按自然周聚合的日线）与周线均线。
+
+    The weekly chart is what separates "a strong month" from "a strong week";
+    discovery only needs the latest weeks, but the table keeps a short history
+    so the trend can be read without touching 5 years of daily bars.
+    """
+
+    __tablename__ = "weekly_bar"
+
+    code: Mapped[str] = mapped_column(String(6), primary_key=True)
+    week_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    open: Mapped[float | None] = mapped_column(Float, default=None)
+    high: Mapped[float | None] = mapped_column(Float, default=None)
+    low: Mapped[float | None] = mapped_column(Float, default=None)
+    close: Mapped[float | None] = mapped_column(Float, default=None)
+    volume: Mapped[float | None] = mapped_column(Float, default=None)
+    amount: Mapped[float | None] = mapped_column(Float, default=None)
+    pct_chg: Mapped[float | None] = mapped_column(Float, default=None)
+    ma5: Mapped[float | None] = mapped_column(Float, default=None)
+    ma10: Mapped[float | None] = mapped_column(Float, default=None)
+    ma20: Mapped[float | None] = mapped_column(Float, default=None)
+    ma30: Mapped[float | None] = mapped_column(Float, default=None)
+    weeks: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    __table_args__ = (Index("ix_weekly_bar_week", "week_end"),)
 
 
 class Candidate(Base):
@@ -458,4 +504,5 @@ __all__ = [
     "TradePlan",
     "TradeCalendar",
     "Watchlist",
+    "WeeklyBar",
 ]

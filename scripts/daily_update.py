@@ -26,6 +26,7 @@ from app.providers.base import is_main_board  # noqa: E402
 from app.services.bars import bars_from_snapshot, incremental_bars  # noqa: E402
 from app.services.calendar import is_trading_day, market_session  # noqa: E402
 from app.services.discovery import run_discovery  # noqa: E402
+from app.services.indicators import rebuild_daily, rebuild_weekly  # noqa: E402
 from app.services.industries import needs_sync, sync_industries  # noqa: E402
 from app.services.limit_board import get_lhb_seats, get_limit_pool  # noqa: E402
 from app.services.quotes import QuoteService  # noqa: E402
@@ -42,6 +43,7 @@ def main() -> int:
         help="逐只回补最近 12 天（较慢，除权修复用；日常不需要）",
     )
     parser.add_argument("--skip-universe", action="store_true", help="跳过股票列表同步")
+    parser.add_argument("--skip-indicators", action="store_true", help="跳过指标表重建")
     parser.add_argument("--force", action="store_true", help="非交易日也执行")
     args = parser.parse_args()
 
@@ -85,6 +87,16 @@ def main() -> int:
                 written = bars_from_snapshot(session, quotes)
                 session.commit()
                 print(f"收盘快照 K 线：写入 {written} 只（未逐只请求）")
+
+        # Rebuild the derived tables for the latest sessions. Features are
+        # computed from the full history, so the last few rows are exact.
+        if not args.skip_indicators:
+            stats = rebuild_daily(session, codes, days=3)
+            weekly = rebuild_weekly(session, codes)
+            print(
+                f"指标表：日线 {stats['rows']} 行 / {stats['elapsed_sec']}s，"
+                f"周线 {weekly['rows']} 行"
+            )
 
         output = run_discovery(session, quotes=quotes, today=target)
         summary = output["summary"]

@@ -14,44 +14,13 @@ from sqlalchemy.orm import Session
 from app.analysis.context import StockContext, StockMeta
 from app.analysis.pipeline import PipelineResult, load_profile, run_pipeline
 from app.config import settings
-from app.db.models import Candidate, DailyBar, JobRun, Stock
+from app.db.models import Candidate, DailyBar, IndicatorDaily, JobRun, Stock
 from app.providers.base import is_main_board
+from app.services.bars import load_bars_map
 from app.services.calendar import market_session
+from app.services.indicators import load_weekly_map
 from app.services.quotes import QuoteService
 from app.services.universe import listed_trading_days, open_dates
-
-BAR_CHUNK = 400
-
-
-def load_bars_map(session: Session, codes: list[str]) -> dict[str, pd.DataFrame]:
-    """Load bars for many stocks in bounded chunks (one query per chunk)."""
-    result: dict[str, pd.DataFrame] = {}
-    columns = (
-        DailyBar.code,
-        DailyBar.trade_date,
-        DailyBar.open,
-        DailyBar.high,
-        DailyBar.low,
-        DailyBar.close,
-        DailyBar.volume,
-        DailyBar.amount,
-        DailyBar.turnover_rate,
-    )
-    for start in range(0, len(codes), BAR_CHUNK):
-        chunk = codes[start : start + BAR_CHUNK]
-        statement = (
-            select(*columns)
-            .where(DailyBar.code.in_(chunk))
-            .order_by(DailyBar.code, DailyBar.trade_date)
-        )
-        # pandas' reader is roughly twice as fast as building the frame from
-        # SQLAlchemy Row tuples for ~100k rows.
-        frame = pd.read_sql_query(statement, session.connection())
-        if frame.empty:
-            continue
-        for code, group in frame.groupby("code", sort=False):
-            result[str(code)] = group.reset_index(drop=True)
-    return result
 
 
 def session_progress(moment: datetime | None = None) -> float:
@@ -172,11 +141,14 @@ def bars_freshness(
     ]
     expected = max(usable) if usable else None
     missed = [day for day in usable if latest < day <= (expected or latest)]
+    indicators_latest = session.scalar(select(func.max(IndicatorDaily.trade_date)))
     return {
         "bars_latest": latest.isoformat(),
         "expected_bar_date": expected.isoformat() if expected else None,
         "bars_stale": expected is not None and latest < expected,
         "bars_stale_days": len(missed),
+        "indicators_latest": indicators_latest.isoformat() if indicators_latest else None,
+        "indicators_stale": indicators_latest is None or indicators_latest < latest,
     }
 
 
@@ -229,6 +201,22 @@ def run_discovery(
     pipeline_seconds = time.perf_counter() - bars_started
     bars_load_seconds = bars_seconds["value"]
     compute_seconds = max(0.0, pipeline_seconds - bars_load_seconds)
+
+    # Weekly context (persisted table) for the survivors only: the weekly chart
+    # is what separates a strong month from a strong week.
+    weekly = load_weekly_map(session, [item["code"] for item in result.candidates], today=today)
+    for item in result.candidates:
+        week = weekly.get(item["code"])
+        item["weekly"] = week
+        if week:
+            item["indicator_snapshot"].update(
+                {
+                    "weekly_ma5": week["ma5"],
+                    "weekly_ma20": week["ma20"],
+                    "weekly_trend": week["trend"],
+                    "week_end": week["week_end"],
+                }
+            )
 
     elapsed = time.perf_counter() - started
     extra = {
