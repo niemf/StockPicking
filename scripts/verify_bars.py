@@ -74,7 +74,7 @@ def main() -> int:
         frame = pd.DataFrame(history, columns=["code", "trade_date", "close"])
         frame["ret"] = frame.groupby("code")["close"].pct_change() * 100
         suspects = frame[frame["ret"].abs() > 10.6]
-        print(f"\n单日涨跌幅超过 ±10.6% 的行：{len(suspects)}（可能是复权衔接或次新股）")
+        print(f"\n单日涨跌幅超过 ±10.6% 的行：{len(suspects)}（次新、复牌/重组首日或复权衔接）")
         for _, row in suspects.head(args.limit).iterrows():
             print(f"  {row['code']} {row['trade_date']} {row['ret']:+.1f}% close={row['close']}")
 

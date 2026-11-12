@@ -30,6 +30,7 @@ from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
 from app.services.discovery import latest_candidates, latest_job, run_discovery
+from app.services.indicators import load_weekly_map
 from app.services.limit_board import get_lhb_seats, get_limit_pool
 from app.services.market_flow import get_lhb, get_sector_flow, get_stock_fund_flow
 from app.services.notifier import condition_text
@@ -769,6 +770,7 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
     flow = get_stock_fund_flow(code)
     notices = get_announcements(code)
     analysis = snapshot_many(db, [code], {code: quote} if quote else {}).get(code)
+    weekly = load_weekly_map(db, [code]).get(code)
     return render(
         request,
         "stock_detail.html",
@@ -784,6 +786,7 @@ def stock_detail(request: Request, code: str, db: Session = Depends(get_db)):
             "industry": stock.industry if stock else None,
             "chart": chart,
             "chart_real": chart_real,
+            "weekly": weekly,
             "report": report_dict(report_row) if report_row else None,
             "analysis": analysis,
             "flow": flow,

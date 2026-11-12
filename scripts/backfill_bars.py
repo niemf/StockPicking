@@ -34,6 +34,11 @@ def main() -> int:
     parser.add_argument("--codes", type=str, default="", help="指定代码，逗号分隔")
     parser.add_argument("--force", action="store_true", help="忽略已有数据，强制重拉")
     parser.add_argument("--incremental", action="store_true", help="只更新最近几个交易日")
+    parser.add_argument(
+        "--fallback-first",
+        action="store_true",
+        help="跳过 AkShare，直接用腾讯/新浪（AkShare 被限流时快 10 倍）",
+    )
     parser.add_argument("--sync-universe", action="store_true", help="先同步股票列表")
     args = parser.parse_args()
 
@@ -62,6 +67,7 @@ def main() -> int:
                 codes,
                 days=args.days or settings.bar_incremental_days,
                 workers=args.workers,
+                prefer_fallback=args.fallback_first,
             )
         else:
             stats = backfill_bars(
@@ -70,6 +76,7 @@ def main() -> int:
                 days=args.days or settings.bar_backfill_days,
                 workers=args.workers,
                 force=args.force,
+                prefer_fallback=args.fallback_first,
             )
 
     print(

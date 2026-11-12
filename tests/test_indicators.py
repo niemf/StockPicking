@@ -196,3 +196,25 @@ def test_daily_bar_dates_survive_the_round_trip(session) -> None:
     newest = session.scalar(select(func.max(IndicatorDaily.trade_date)))
     assert newest == TODAY
     assert newest - timedelta(days=1) < newest
+
+
+def test_indicator_table_matches_live_features(session) -> None:
+    """The table must never drift from what the funnel computes on the fly."""
+    from app.analysis.context import StockContext, StockMeta
+    from app.services.bars import load_bars_map
+
+    bars = make_bars()
+    upsert_bars(session, "600000", bars)
+    session.commit()
+    rebuild_daily(session, ["600000"], progress=False)
+
+    stored = load_indicator_map(session, ["600000"])["600000"]
+    ctx = StockContext(
+        meta=StockMeta(code="600000", name="测试"),
+        bars=load_bars_map(session, ["600000"])["600000"],
+    )
+
+    for field in ("ma5", "ma10", "ma20", "ma30", "ma60", "atr_pct", "volume_ratio", "ret5", "ret20"):
+        live = ctx.feature(field)
+        assert live is not None, field
+        assert stored[field] == pytest.approx(live, rel=1e-3, abs=1e-3), field

@@ -149,6 +149,26 @@
     </span>
     {% endfor %}
   </div>
+  {% if weekly %}
+  <div class="ma-row weekly-row">
+    {% for label, value in [('周MA5', weekly.ma5), ('周MA10', weekly.ma10), ('周MA20', weekly.ma20), ('周MA30', weekly.ma30)] %}
+    <span class="ma-cell">
+      <small>{{ label }}</small>
+      <strong class="{% if value is not none and analysis.price >= value %}up{% elif value is not none %}down{% endif %}">{{ value | num2 }}</strong>
+    </span>
+    {% endfor %}
+    <span class="ma-cell">
+      <small>周线</small>
+      <strong class="{{ weekly.trend or 'flat' }}">
+        {{ {'up': '多头', 'down': '空头', 'flat': '纠缠'}.get(weekly.trend, '—') }}
+      </strong>
+    </span>
+    <span class="ma-cell">
+      <small>周线收盘（{{ weekly.week_end }}）</small>
+      <strong>{{ weekly.pct_chg | pct }}</strong>
+    </span>
+  </div>
+  {% endif %}
   <div class="fact-grid">
     <div><span>成交额</span><strong>{{ analysis.amount_yi | num2 }} 亿</strong></div>
     <div><span>换手率</span><strong>{{ analysis.turnover_rate | num2 }}%</strong></div>

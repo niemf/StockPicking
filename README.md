@@ -109,6 +109,7 @@ TradeAI/
 │   ├── sync_industries.py      # 同步全市场行业分类（Baostock）
 │   ├── backfill_bars.py        # 日线回补 / 增量更新
 │   ├── build_indicators.py     # 重建 indicator_daily / weekly_bar
+│   ├── verify_bars.py          # 日线覆盖度 / 停牌 / 异常涨跌幅 / 指标落后体检
 │   ├── discover.py             # 全市场技术面发现
 │   ├── generate_plans.py       # 为候选生成 AI 交易计划
 │   ├── daily_review.py         # 生成每日复盘
@@ -332,13 +333,16 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 > 这一步是**一次性初始化**，不是每天运行。之后每天用收盘快照拼出当日 K 线，不再逐只请求历史。
 
+> 东方财富限流时（AkShare 报 `push2` 访问受限），加 `--fallback-first` 直接走腾讯/新浪，速度约快 10 倍：
+> `scripts\backfill_bars.py --force --fallback-first`
+
 日常盘后（建议每个交易日 15:35 跑一次，约 10 秒）：
 
 ```powershell
 & '.venv\python.exe' scripts\daily_update.py
 ```
 
-它会用一次批量收盘行情写入当日 K 线，然后直接跑全市场发现；行业分类每 7 天自动刷新一次（Baostock，约 90 秒），并预热涨停池/龙虎榜。建议每周日额外执行一次
+它会用一次批量收盘行情写入当日 K 线，重建最近 3 根日线指标与周线，然后跑全市场发现；行业分类每 7 天自动刷新一次（Baostock，约 90 秒），并预热涨停池/龙虎榜。建议每周日额外执行一次
 `scripts\backfill_bars.py --force`（约 8 分钟），修复除权除息造成的前复权衔接偏差。
 
 ### 运行发现
@@ -427,7 +431,15 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 
 `scripts\daily_update.py` 已经把它串进盘后流程：写当日 K 线 → 重建最近 3 根日线指标 + 周线 → 跑全市场发现。
 
-周线在候选表里显示为「多头 / 空头 / 纠缠」，由 `load_weekly_map()` 从 `weekly_bar` 读取，不需要额外请求接口。
+周线在候选表里显示为「多头 / 空头 / 纠缠」，个股页在日线均线下面多一行「周MA5/10/20/30 + 周线多空 + 本周涨跌」，同样由 `load_weekly_map()` 从 `weekly_bar` 读取，不需要额外请求接口。
+
+数据对不对，用体检脚本看一遍就清楚：
+
+```powershell
+& '.venv\python.exe' scripts\verify_bars.py
+```
+
+输出包括：日线总行数/股票数/日期区间、最近 N 个交易日每天覆盖多少只、最后一根 K 线落后的股票（多为停牌）、不足 60 根的股票、单日涨跌幅超过 ±10.6% 的可疑行（复权衔接或次新）、指标表是否落后日线、以及主板里完全没有日线的代码。
 
 ### 策略配置
 

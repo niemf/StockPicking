@@ -2354,6 +2354,12 @@ select:focus {
   color: #6b7280;
 }
 
+.weekly-row {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line, #e5e9f2);
+}
+
 .rank-badge {
   display: inline-grid;
   place-items: center;

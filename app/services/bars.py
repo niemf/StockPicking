@@ -259,10 +259,16 @@ def _run_batch(
     end: date,
     workers: int,
     label: str,
+    prefer_fallback: bool = False,
 ) -> dict:
     provider = AkShareProvider()
     fallbacks = [TencentProvider(), SinaProvider()]
-    state = {"ak_failures": 0, "use_fallback": False, "strikes": {}, "down": set()}
+    state = {
+        "ak_failures": 0,
+        "use_fallback": prefer_fallback,
+        "strikes": {},
+        "down": set(),
+    }
     stats = {"requested": len(codes), "written": 0, "failed": []}
     started = time.perf_counter()
 
@@ -303,6 +309,7 @@ def backfill_bars(
     days: int | None = None,
     workers: int | None = None,
     force: bool = False,
+    prefer_fallback: bool = False,
 ) -> dict:
     """Fetch history for stocks that do not have enough cached bars."""
     days = days or settings.bar_backfill_days
@@ -329,7 +336,15 @@ def backfill_bars(
         start,
         end,
     )
-    stats = _run_batch(session, todo, start=start, end=end, workers=workers, label="backfill")
+    stats = _run_batch(
+        session,
+        todo,
+        start=start,
+        end=end,
+        workers=workers,
+        label="backfill",
+        prefer_fallback=prefer_fallback,
+    )
     stats["skipped"] = skipped
     return stats
 
@@ -340,6 +355,7 @@ def incremental_bars(
     *,
     days: int | None = None,
     workers: int | None = None,
+    prefer_fallback: bool = False,
 ) -> dict:
     """Update the most recent sessions; stocks without history are left alone."""
     days = days or settings.bar_incremental_days
@@ -354,6 +370,14 @@ def incremental_bars(
         logger.warning("incremental: {} stocks have no history; run backfill first", missing)
 
     logger.info("incremental: {} stocks, {}..{}", len(todo), start, end)
-    stats = _run_batch(session, todo, start=start, end=end, workers=workers, label="incremental")
+    stats = _run_batch(
+        session,
+        todo,
+        start=start,
+        end=end,
+        workers=workers,
+        label="incremental",
+        prefer_fallback=prefer_fallback,
+    )
     stats["missing_history"] = missing
     return stats

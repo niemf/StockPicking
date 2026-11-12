@@ -44,6 +44,9 @@ def main() -> int:
     )
     parser.add_argument("--skip-universe", action="store_true", help="跳过股票列表同步")
     parser.add_argument("--skip-indicators", action="store_true", help="跳过指标表重建")
+    parser.add_argument(
+        "--fallback-first", action="store_true", help="日线走腾讯/新浪（AkShare 限流时用）"
+    )
     parser.add_argument("--force", action="store_true", help="非交易日也执行")
     args = parser.parse_args()
 
@@ -75,7 +78,9 @@ def main() -> int:
 
         if not args.skip_bars:
             if args.full_bars:
-                stats = incremental_bars(session, codes)
+                stats = incremental_bars(
+                    session, codes, prefer_fallback=args.fallback_first
+                )
                 print(
                     f"日线增量（逐只）：写入 {stats['written']} 行，失败 {len(stats['failed'])} 只，"
                     f"耗时 {stats.get('elapsed_sec', 0)}s"
