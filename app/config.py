@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     quote_primary: str = "tencent"
     quote_timeout_seconds: float = 8.0
     quote_cache_seconds: int = 10
-    poll_interval_seconds: int = 120
+    poll_interval_seconds: int = 60
     quote_batch_size: int = 400
     quote_workers: int = 6
 
@@ -52,6 +52,28 @@ class Settings(BaseSettings):
     alert_rearm_pct: float = 0.5
     alert_trailing_drawdown_pct: float = 8.0
     alert_price_change_pct: float = 5.0
+
+    # Watchlist intraday signals. All deterministic (no AI) and evaluated on the
+    # same batched quote as the stop-loss rules; only the watchlist pays for the
+    # extra daily-bar read.
+    alert_watch_stats_enabled: bool = True
+    alert_breakout_enabled: bool = True
+    alert_breakout_volume_ratio: float = 2.0
+    alert_breakout_tolerance_pct: float = 0.5
+    alert_breakout_max_per_day: int = 4
+    alert_intraday_enabled: bool = True
+    alert_intraday_strength_pct: float = 1.0
+    alert_intraday_volume_ratio: float = 1.2
+    alert_intraday_max_per_day: int = 4
+    alert_buy_signal_enabled: bool = True
+    alert_buy_score: int = 6
+    alert_buy_rsi_max: float = 70.0
+    alert_buy_resistance_min_pct: float = 2.0
+    alert_buy_max_per_day: int = 3
+    alert_pullback_enabled: bool = True
+    alert_pullback_tolerance_pct: float = 1.0
+    alert_pullback_volume_max: float = 1.0
+    alert_pullback_max_per_day: int = 3
 
     # AI
     deepseek_api_key: str = ""

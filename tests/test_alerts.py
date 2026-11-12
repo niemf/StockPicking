@@ -103,14 +103,20 @@ def test_ensure_rules_from_holding_and_watch(session) -> None:
     _make_watch_with_plan(session)
 
     summary = alerts.ensure_rules(session)
-    # 2 holding rules (stop / tp1; trailing waits for a run-up) + 2 watch rules.
-    assert summary["total"] == 4
+    # 2 holding rules (stop / tp1; trailing waits for a run-up) + 7 watch rules
+    # (buy zone, price change, breakout, strong/weak intraday, buy signal, pullback).
+    assert summary["total"] == 9
     rules = list(session.scalars(select(AlertRule)))
     assert {rule.rule_type for rule in rules} == {
         "STOP_LOSS",
         "TAKE_PROFIT_1",
         "PRICE_IN_BUY_ZONE",
         "PRICE_CHANGE",
+        "VOLUME_BREAKOUT",
+        "INTRADAY_STRONG",
+        "INTRADAY_WEAK",
+        "BUY_SIGNAL",
+        "PULLBACK_BUY",
     }
     stop_rule = next(rule for rule in rules if rule.rule_type == "STOP_LOSS")
     assert stop_rule.target_type == "holding"

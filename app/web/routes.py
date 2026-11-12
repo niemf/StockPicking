@@ -1109,6 +1109,8 @@ def alerts_page(request: Request, db: Session = Depends(get_db)):
             "monitor": monitor_service.monitor_status(),
             "regime": MARKET_REGIME,
             "rules": alert_service.list_custom_rules(db),
+            "builtin_rules": alert_service.builtin_rule_summary(),
+            "poll_interval": settings.poll_interval_seconds,
             "metrics": alert_service.RULE_METRICS,
             "ops": alert_service.RULE_OPS,
             "channels": alert_service.RULE_CHANNELS,

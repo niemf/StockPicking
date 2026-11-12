@@ -31,6 +31,11 @@ SUGGESTIONS = {
     "TAKE_PROFIT_2": "到达第二止盈位，剩余仓位可用移动止盈跟踪。",
     "PRICE_IN_BUY_ZONE": "进入计划建仓区间，按计划分批执行，并确认止损位。",
     "PRICE_CHANGE": "波动异常，先检查公告、板块联动与成交量，再决定是否操作。",
+    "VOLUME_BREAKOUT": "放量突破 20 日高点，确认尾盘能否站稳；冲高回落且缩量多为假突破。",
+    "INTRADAY_STRONG": "分时强于均价，趋势健康；若回落到均价下方并放量，注意动能衰竭。",
+    "INTRADAY_WEAK": "分时弱于均价，短线抛压偏重；结合日线支撑决定是否减仓。",
+    "BUY_SIGNAL": "技术条件成立且上方有空间，按计划分批；跌破 MA20 或止损位则放弃。",
+    "PULLBACK_BUY": "缩量回踩 MA20 不破是低吸观察点；放量跌破均线则不是买点。",
     "COMPOSITE": "自定义条件已满足，按你设定的计划处理，注意确认成交量与板块方向。",
 }
 
@@ -49,6 +54,7 @@ def _fmt(value: Any, digits: int = 2) -> str:
 
 def _condition_text(rule_type: str, threshold: Any, snapshot: dict[str, Any]) -> str:
     price = _fmt(snapshot.get("price"))
+    stats = snapshot.get("stats") or {}
     if rule_type == "STOP_LOSS":
         return f"现价 {price} ≤ 止损价 {_fmt(threshold)}"
     if rule_type == "TRAILING_STOP":
@@ -61,7 +67,32 @@ def _condition_text(rule_type: str, threshold: Any, snapshot: dict[str, Any]) ->
         params = snapshot.get("params") or {}
         return f"现价 {price} 进入建仓区间 {_fmt(params.get('buy_low'))} ~ {_fmt(params.get('buy_high'))}"
     if rule_type == "PRICE_CHANGE":
-        return f"当日涨跌幅 {_fmt(snapshot.get('pct_chg'))}% 超过阈值 {_fmt(threshold)}%"
+        direction = "大涨" if (snapshot.get("pct_chg") or 0) > 0 else "大跌"
+        return f"{direction}：当日涨跌幅 {_fmt(snapshot.get('pct_chg'))}%，阈值 {_fmt(threshold)}%"
+    if rule_type == "VOLUME_BREAKOUT":
+        return (
+            f"量比 {_fmt(stats.get('volume_ratio'))}（阈值 "
+            f"{_fmt((snapshot.get('params') or {}).get('volume_ratio'))}），现价 {price} "
+            f"站上 20 日高点 {_fmt(stats.get('high20_prev'))}"
+        )
+    if rule_type in {"INTRADAY_STRONG", "INTRADAY_WEAK"}:
+        side = "高于" if rule_type == "INTRADAY_STRONG" else "低于"
+        return (
+            f"现价 {price} {side}当日均价 {_fmt(stats.get('vwap'))}"
+            f"（{_fmt(stats.get('vwap_dist'))}%），量比 {_fmt(stats.get('volume_ratio'))}"
+        )
+    if rule_type == "BUY_SIGNAL":
+        return (
+            f"技术评分 {_fmt(stats.get('score'), 0)}（{stats.get('verdict') or '看多'}），"
+            f"RSI {_fmt(stats.get('rsi12'), 0)}，距压力 {_fmt(stats.get('resistance_dist'))}%"
+        )
+    if rule_type == "PULLBACK_BUY":
+        ma20 = stats.get("ma20")
+        dist = (snapshot.get("price") / ma20 - 1) * 100 if ma20 else None
+        return (
+            f"现价 {price} 贴着 MA20 {_fmt(ma20)}（{_fmt(dist)}%），"
+            f"量比 {_fmt(stats.get('volume_ratio'))}，MA20 斜率 {_fmt(stats.get('ma20_slope3'))}%"
+        )
     if rule_type == "COMPOSITE":
         joiner = " 或 " if str(snapshot.get("logic") or "AND").upper() == "OR" else " 且 "
         parts = []

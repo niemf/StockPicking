@@ -25,6 +25,7 @@ from app.db.models import Holding, Quote, Watchlist
 from app.providers.base import Quote as QuoteModel
 from app.services import alerts
 from app.services.calendar import now_local, session_status
+from app.services.intraday import build_stats
 from app.services.notifier import Notifier
 from app.services.quotes import QuoteService
 
@@ -39,6 +40,7 @@ last_tick: dict = {
     "reason": "not_started",
     "codes": 0,
     "quotes": 0,
+    "stats": 0,
     "events": 0,
     "sent": 0,
 }
@@ -58,6 +60,13 @@ def collect_codes(session: Session) -> list[str]:
     watch_codes = session.scalars(select(Watchlist.code).where(Watchlist.status == "active")).all()
     holding_codes = session.scalars(select(Holding.code).where(Holding.status == "open")).all()
     return sorted(set(watch_codes) | set(holding_codes))
+
+
+def collect_watch_codes(session: Session) -> list[str]:
+    """Watchlist only: these get the intraday stats and buy-signal rules."""
+    return sorted(
+        set(session.scalars(select(Watchlist.code).where(Watchlist.status == "active")).all())
+    )
 
 
 def _update_trailing_highs(session: Session, quotes: dict[str, QuoteModel]) -> int:
@@ -146,10 +155,22 @@ def run_once(
         quotes = service.get_quotes(codes)
         _update_trailing_highs(session, quotes)
         rules = alerts.ensure_rules(session)
+
+        # Watchlist diagnostics: one small bars read, reused by every intraday
+        # rule on this tick. A failure only disables those rules, never the tick.
+        watch_stats: dict = {}
+        if settings.alert_watch_stats_enabled:
+            watch_codes = collect_watch_codes(session)
+            if watch_codes:
+                try:
+                    watch_stats = build_stats(session, watch_codes, quotes, moment=moment)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("intraday stats failed: {}", exc)
+
         stored = _persist_quotes(session, quotes, moment)
         session.commit()
 
-        events = alerts.evaluate(session, quotes, moment=moment)
+        events = alerts.evaluate(session, quotes, moment=moment, stats=watch_stats)
         delivery = {"sent": 0, "failed": 0}
         if events and not dry_run:
             delivery = (notifier or Notifier()).notify_pending(session, limit=len(events))
@@ -160,6 +181,7 @@ def run_once(
             "at": moment.isoformat(timespec="seconds"),
             "codes": len(codes),
             "quotes": len(quotes),
+            "stats": len([item for item in watch_stats.values() if item.get("available")]),
             "stored": stored,
             "events": [
                 {
@@ -183,6 +205,7 @@ def run_once(
             reason="polled",
             codes=len(codes),
             quotes=len(quotes),
+            stats=summary["stats"],
             events=len(events),
             sent=delivery["sent"],
         )
@@ -222,12 +245,17 @@ async def monitor_loop(stop_event: asyncio.Event) -> None:
             except Exception as exc:  # noqa: BLE001
                 logger.warning("quote prune failed: {}", exc)
 
+    def _tick() -> None:
+        # Stats + notifications are blocking calls; running the tick in a worker
+        # thread keeps page requests responsive while a poll is in flight.
+        with SessionLocal() as session:
+            run_once(session)
+
     await asyncio.to_thread(_bootstrap)
     logger.info("monitor loop started (interval={}s)", settings.poll_interval_seconds)
     while not stop_event.is_set():
         try:
-            with SessionLocal() as session:
-                run_once(session)
+            await asyncio.to_thread(_tick)
         except Exception:  # noqa: BLE001 - never let the loop die silently
             logger.exception("unhandled monitor loop error")
 

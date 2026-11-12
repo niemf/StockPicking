@@ -6,7 +6,7 @@
     <p class="eyebrow">ALERTS</p>
     <h1>预警</h1>
     <p class="subtitle">
-      规则由持仓止损/止盈与自选建仓区间自动生成，经连续采样确认后推送飞书。
+      规则由持仓止损/止盈、自选建仓区间与自选盘中信号（放量突破 / 分时强弱 / 买入信号 / 回踩）自动生成，经连续采样确认后推送飞书。
       当前共 {{ rule_count }} 条规则 · {{ count }} 条事件。
     </p>
   </div>
@@ -39,18 +39,43 @@
   <article class="stat-card">
     <span class="stat-label">机会类事件</span>
     <strong class="stat-value down">{{ alert_counts.success }}</strong>
-    <span class="stat-sub">止盈 {{ alert_counts.success }} 条 · 建仓/异动 {{ alert_counts.info }} 条</span>
+    <span class="stat-sub">止盈 / 买入 {{ alert_counts.success }} 条 · 建仓 / 异动 / 突破 / 分时 {{ alert_counts.info }} 条</span>
   </article>
 </section>
 
 {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 {% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
 
+<section class="panel" id="builtin-rules">
+  <div class="panel-head">
+    <div>
+      <h2>内置监控项</h2>
+      <p>自选股自动生成，无需配置；每 {{ poll_interval }} 秒轮询一次，全部由程序计算（零 AI）</p>
+    </div>
+    <span class="badge badge-source">程序判定</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>规则</th><th>触发条件</th><th>状态</th></tr></thead>
+      <tbody>
+        {% for item in builtin_rules %}
+        <tr>
+          <td><strong>{{ item.label }}</strong></td>
+          <td><span class="alert-condition">{{ item.text }}</span></td>
+          <td><span class="badge {{ 'badge-source' if item.enabled else 'badge-group' }}">{{ '已开启' if item.enabled else '已关闭' }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="field-hint">关闭方式：在 `.env` 里设置 `ALERT_BREAKOUT_ENABLED=false` / `ALERT_INTRADAY_ENABLED=false` / `ALERT_BUY_SIGNAL_ENABLED=false` / `ALERT_PULLBACK_ENABLED=false`，重启后生效。</p>
+</section>
+
 <section class="panel" id="custom-rule">
   <div class="panel-head">
     <div>
       <h2>自定义组合预警</h2>
-      <p>价格、涨跌幅、成交额、换手率自由组合，支持 AND / OR、每日次数上限与到期日</p>
+      <p>价格、涨跌幅、量比、分时偏离、距涨停、振幅、技术评分自由组合，支持 AND / OR、每日次数上限与到期日</p>
     </div>
     <span class="badge badge-source">飞书优先</span>
   </div>

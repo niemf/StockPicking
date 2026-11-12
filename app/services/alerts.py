@@ -32,16 +32,27 @@ RULE_META: dict[str, dict[str, Any]] = {
     "TAKE_PROFIT_2": {"label": "止盈二", "priority": 20, "color": "green"},
     "PRICE_IN_BUY_ZONE": {"label": "进入建仓区", "priority": 50, "color": "blue"},
     "PRICE_CHANGE": {"label": "异动", "priority": 80, "color": "blue"},
+    "VOLUME_BREAKOUT": {"label": "放量突破", "priority": 35, "color": "blue"},
+    "INTRADAY_STRONG": {"label": "分时走强", "priority": 45, "color": "blue"},
+    "INTRADAY_WEAK": {"label": "分时走弱", "priority": 45, "color": "red"},
+    "BUY_SIGNAL": {"label": "买入信号", "priority": 30, "color": "green"},
+    "PULLBACK_BUY": {"label": "回踩买点", "priority": 32, "color": "green"},
     "COMPOSITE": {"label": "自定义条件", "priority": 60, "color": "blue"},
 }
 
 # Metrics available to user-defined composite rules. Values are read straight
-# from the real-time quote so evaluation stays cheap and AI-free.
+# from the real-time quote (plus the per-tick watchlist stats) so evaluation
+# stays cheap and AI-free.
 RULE_METRICS: dict[str, dict[str, Any]] = {
     "price": {"label": "价格", "unit": "元"},
     "pct_chg": {"label": "涨跌幅", "unit": "%"},
     "amount_yi": {"label": "成交额", "unit": "亿"},
     "turnover_rate": {"label": "换手率", "unit": "%"},
+    "volume_ratio": {"label": "量比", "unit": "倍"},
+    "vwap_dist": {"label": "分时偏离", "unit": "%"},
+    "limit_dist": {"label": "距涨停", "unit": "%"},
+    "amplitude": {"label": "振幅", "unit": "%"},
+    "tech_score": {"label": "技术评分", "unit": "分"},
 }
 
 RULE_OPS: dict[str, str] = {">=": "≥", "<=": "≤", ">": ">", "<": "<"}
@@ -69,11 +80,15 @@ def _spec(
     confirm_samples: int,
     cooldown_sec: int,
     rearm_pct: float,
+    max_per_day: int = 0,
 ) -> dict[str, Any]:
     meta = rule_meta(rule_type)
+    payload = dict(params)
+    if max_per_day > 0:
+        payload["max_per_day"] = max_per_day
     return {
         "rule_type": rule_type,
-        "params": params,
+        "params": payload,
         "priority": meta["priority"],
         "confirm_samples": max(1, confirm_samples),
         "cooldown_sec": max(0, cooldown_sec),
@@ -159,6 +174,64 @@ def _watch_specs(watch: Watchlist, plan: TradePlan | None) -> list[dict[str, Any
             rearm_pct=settings.alert_rearm_pct,
         )
     )
+    if settings.alert_breakout_enabled:
+        specs.append(
+            _spec(
+                "VOLUME_BREAKOUT",
+                {
+                    "volume_ratio": float(settings.alert_breakout_volume_ratio),
+                    "tolerance_pct": float(settings.alert_breakout_tolerance_pct),
+                },
+                confirm_samples=settings.alert_confirm_samples,
+                cooldown_sec=settings.alert_cooldown_seconds,
+                rearm_pct=settings.alert_rearm_pct,
+                max_per_day=settings.alert_breakout_max_per_day,
+            )
+        )
+    if settings.alert_intraday_enabled:
+        for rule_type in ("INTRADAY_STRONG", "INTRADAY_WEAK"):
+            specs.append(
+                _spec(
+                    rule_type,
+                    {
+                        "strength_pct": float(settings.alert_intraday_strength_pct),
+                        "volume_ratio": float(settings.alert_intraday_volume_ratio),
+                    },
+                    confirm_samples=settings.alert_confirm_samples,
+                    cooldown_sec=settings.alert_cooldown_seconds,
+                    rearm_pct=settings.alert_rearm_pct,
+                    max_per_day=settings.alert_intraday_max_per_day,
+                )
+            )
+    if settings.alert_buy_signal_enabled:
+        specs.append(
+            _spec(
+                "BUY_SIGNAL",
+                {
+                    "min_score": int(settings.alert_buy_score),
+                    "max_rsi": float(settings.alert_buy_rsi_max),
+                    "min_resistance_pct": float(settings.alert_buy_resistance_min_pct),
+                },
+                confirm_samples=settings.alert_confirm_samples,
+                cooldown_sec=settings.alert_cooldown_seconds * 2,
+                rearm_pct=settings.alert_rearm_pct,
+                max_per_day=settings.alert_buy_max_per_day,
+            )
+        )
+    if settings.alert_pullback_enabled:
+        specs.append(
+            _spec(
+                "PULLBACK_BUY",
+                {
+                    "tolerance_pct": float(settings.alert_pullback_tolerance_pct),
+                    "volume_max": float(settings.alert_pullback_volume_max),
+                },
+                confirm_samples=settings.alert_confirm_samples,
+                cooldown_sec=settings.alert_cooldown_seconds * 2,
+                rearm_pct=settings.alert_rearm_pct,
+                max_per_day=settings.alert_pullback_max_per_day,
+            )
+        )
     return specs
 
 
@@ -264,7 +337,39 @@ def _trailing_level(rule: AlertRule, holding: Holding) -> float | None:
     return level if level > 0 else None
 
 
-def _metric_value(metric: str, quote: Quote) -> float | None:
+def _stat(stats: dict[str, Any] | None, key: str) -> float | None:
+    """Read one numeric field from the per-tick watchlist stats."""
+    if not stats:
+        return None
+    value = stats.get(key)
+    if value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def vwap(quote: Quote) -> float | None:
+    """Intraday average price: amount (元) / volume (股), provider independent."""
+    if quote.volume > 0 and quote.amount > 0:
+        return quote.amount / quote.volume
+    return None
+
+
+def _vwap_dist(quote: Quote) -> float | None:
+    avg = vwap(quote)
+    if not avg or avg <= 0:
+        return None
+    return (quote.price / avg - 1) * 100
+
+
+def _metric_value(
+    metric: str,
+    quote: Quote,
+    stats: dict[str, Any] | None = None,
+) -> float | None:
     metric = METRIC_ALIASES.get(metric, metric)
     if metric == "price":
         return quote.price
@@ -274,6 +379,20 @@ def _metric_value(metric: str, quote: Quote) -> float | None:
         return quote.amount / 1e8
     if metric == "turnover_rate":
         return quote.turnover_rate
+    if metric == "vwap_dist":
+        return _vwap_dist(quote)
+    if metric == "limit_dist":
+        if quote.limit_up and quote.limit_up > quote.price > 0:
+            return (quote.limit_up / quote.price - 1) * 100
+        return None
+    if metric == "amplitude":
+        if quote.pre_close > 0:
+            return (quote.high - quote.low) / quote.pre_close * 100
+        return None
+    if metric == "volume_ratio":
+        return _stat(stats, "volume_ratio")
+    if metric == "tech_score":
+        return _stat(stats, "score")
     return None
 
 
@@ -289,7 +408,11 @@ def _compare(left: float, op: str, right: float) -> bool:
     return False
 
 
-def eval_composite(params: dict[str, Any], quote: Quote) -> tuple[bool, list[dict[str, Any]]]:
+def eval_composite(
+    params: dict[str, Any],
+    quote: Quote,
+    stats: dict[str, Any] | None = None,
+) -> tuple[bool, list[dict[str, Any]]]:
     """Evaluate the user-defined condition list; returns (triggered, detail)."""
     conditions = params.get("conditions") or []
     detail: list[dict[str, Any]] = []
@@ -300,7 +423,7 @@ def eval_composite(params: dict[str, Any], quote: Quote) -> tuple[bool, list[dic
             value = float(item.get("value"))
         except (TypeError, ValueError):
             continue
-        actual = _metric_value(metric, quote)
+        actual = _metric_value(metric, quote, stats)
         ok = actual is not None and _compare(actual, op, value)
         detail.append(
             {
@@ -319,14 +442,132 @@ def eval_composite(params: dict[str, Any], quote: Quote) -> tuple[bool, list[dic
     return all(item["ok"] for item in detail), detail
 
 
-def _condition(rule: AlertRule, quote: Quote, holding: Holding | None) -> tuple[bool, float | None]:
+# ---------------------------------------------------------- built-in triggers
+def volume_breakout_triggered(
+    params: dict[str, Any],
+    quote: Quote,
+    stats: dict[str, Any] | None,
+) -> bool:
+    """放量突破：量比放大，且价格站上 20 日高点附近。"""
+    ratio = _stat(stats, "volume_ratio")
+    high20 = _stat(stats, "high20_prev")
+    if ratio is None or not high20:
+        return False
+    need = float(params.get("volume_ratio", settings.alert_breakout_volume_ratio))
+    tolerance = float(params.get("tolerance_pct", settings.alert_breakout_tolerance_pct)) / 100
+    return ratio >= need and quote.price >= high20 * (1 - tolerance) and quote.pct_chg > 0
+
+
+def intraday_triggered(
+    params: dict[str, Any],
+    quote: Quote,
+    stats: dict[str, Any] | None,
+    *,
+    side: str = "strong",
+) -> bool:
+    """分时强弱：价格相对当日均价（VWAP）的偏离，配合量能确认。"""
+    dist = _vwap_dist(quote)
+    if dist is None:
+        return False
+    need = float(params.get("strength_pct", settings.alert_intraday_strength_pct))
+    ratio = _stat(stats, "volume_ratio")
+    min_ratio = float(params.get("volume_ratio", settings.alert_intraday_volume_ratio))
+    if ratio is not None and ratio < min_ratio:
+        return False
+    if side == "weak":
+        return dist <= -need and quote.pct_chg < 0
+    return dist >= need and quote.pct_chg > 0
+
+
+def buy_signal_triggered(
+    params: dict[str, Any],
+    quote: Quote,
+    stats: dict[str, Any] | None,
+) -> bool:
+    """技术分确认的买入信号：看多 + 分数达标 + 未超买 + 上方有空间。"""
+    if not stats or not stats.get("available"):
+        return False
+    score = _stat(stats, "score")
+    if score is None:
+        return False
+    min_score = float(params.get("min_score", settings.alert_buy_score))
+    if score < min_score or str(stats.get("verdict") or "") != "看多":
+        return False
+
+    # Do not call a sharp down day a buy signal; the pullback rule covers dips.
+    if quote.pct_chg < float(params.get("min_pct_chg", -2.0)):
+        return False
+
+    rsi = _stat(stats, "rsi12")
+    if rsi is not None and rsi > float(params.get("max_rsi", settings.alert_buy_rsi_max)):
+        return False
+
+    resistance_dist = _stat(stats, "resistance_dist")
+    need_room = float(params.get("min_resistance_pct", settings.alert_buy_resistance_min_pct))
+    if resistance_dist is not None and resistance_dist < need_room:
+        return False
+
+    ma20 = _stat(stats, "ma20")
+    if ma20 is not None and quote.price < ma20 * 0.98:
+        return False
+    return True
+
+
+def pullback_triggered(
+    params: dict[str, Any],
+    quote: Quote,
+    stats: dict[str, Any] | None,
+) -> bool:
+    """缩量回踩 MA20：均线向上、量能收缩、价格贴着均线。"""
+    if not stats or not stats.get("available"):
+        return False
+    ma20 = _stat(stats, "ma20")
+    if not ma20 or ma20 <= 0:
+        return False
+    tolerance = float(params.get("tolerance_pct", settings.alert_pullback_tolerance_pct))
+    dist = (quote.price / ma20 - 1) * 100
+    if abs(dist) > tolerance:
+        return False
+    if (_stat(stats, "ma20_slope3") or 0.0) < 0:
+        return False
+    ratio = _stat(stats, "volume_ratio")
+    volume_max = float(params.get("volume_max", settings.alert_pullback_volume_max))
+    if ratio is not None and ratio > volume_max:
+        return False
+    rsi = _stat(stats, "rsi12")
+    if rsi is not None and rsi > 65:
+        return False
+    return quote.pct_chg <= 2.0
+
+
+def _condition(
+    rule: AlertRule,
+    quote: Quote,
+    holding: Holding | None,
+    stats: dict[str, Any] | None = None,
+) -> tuple[bool, float | None]:
     """Return ``(is_triggered, threshold)``; threshold is stored for the card."""
     params = rule.params or {}
     price = quote.price
 
     if rule.rule_type == "COMPOSITE":
-        triggered, _ = eval_composite(params, quote)
+        triggered, _ = eval_composite(params, quote, stats)
         return triggered, None
+
+    if rule.rule_type == "VOLUME_BREAKOUT":
+        return volume_breakout_triggered(params, quote, stats), _stat(stats, "high20_prev")
+
+    if rule.rule_type == "INTRADAY_STRONG":
+        return intraday_triggered(params, quote, stats, side="strong"), vwap(quote)
+
+    if rule.rule_type == "INTRADAY_WEAK":
+        return intraday_triggered(params, quote, stats, side="weak"), vwap(quote)
+
+    if rule.rule_type == "BUY_SIGNAL":
+        return buy_signal_triggered(params, quote, stats), _stat(stats, "ma20")
+
+    if rule.rule_type == "PULLBACK_BUY":
+        return pullback_triggered(params, quote, stats), _stat(stats, "ma20")
 
     if rule.rule_type == "STOP_LOSS":
         stop = float(params.get("stop") or 0)
@@ -354,7 +595,11 @@ def _condition(rule: AlertRule, quote: Quote, holding: Holding | None) -> tuple[
     return False, None
 
 
-def _recovered(rule: AlertRule, quote: Quote) -> bool:
+def _recovered(
+    rule: AlertRule,
+    quote: Quote,
+    stats: dict[str, Any] | None = None,
+) -> bool:
     """Whether price has moved far enough back for the rule to re-arm."""
     buffer = max(0.0, float(rule.rearm_threshold or 0))
     price = quote.price
@@ -379,6 +624,33 @@ def _recovered(rule: AlertRule, quote: Quote) -> bool:
     if rule.rule_type == "PRICE_CHANGE":
         threshold = float(params.get("threshold_pct") or 0)
         return abs(quote.pct_chg) < max(0.0, threshold - buffer * 100)
+
+    if rule.rule_type == "VOLUME_BREAKOUT":
+        high20 = _stat(stats, "high20_prev")
+        tolerance = float(params.get("tolerance_pct", settings.alert_breakout_tolerance_pct)) / 100
+        if not high20:
+            return True
+        return price < high20 * (1 - tolerance - buffer)
+
+    if rule.rule_type in {"INTRADAY_STRONG", "INTRADAY_WEAK"}:
+        dist = _vwap_dist(quote)
+        if dist is None:
+            return True
+        need = float(params.get("strength_pct", settings.alert_intraday_strength_pct))
+        gap = max(0.3, buffer * 100)
+        return dist < need - gap if rule.rule_type == "INTRADAY_STRONG" else dist > -need + gap
+
+    if rule.rule_type == "BUY_SIGNAL":
+        score = _stat(stats, "score")
+        min_score = float(params.get("min_score", settings.alert_buy_score))
+        return score is not None and score < min_score - 1
+
+    if rule.rule_type == "PULLBACK_BUY":
+        ma20 = _stat(stats, "ma20")
+        if not ma20:
+            return True
+        tolerance = float(params.get("tolerance_pct", settings.alert_pullback_tolerance_pct))
+        return abs((price / ma20 - 1) * 100) > tolerance + buffer * 100
 
     if rule.rule_type == "COMPOSITE":
         # Composite rules re-arm as soon as the condition set is false.
@@ -411,6 +683,7 @@ def _snapshot(
     holding: Holding | None,
     plan: TradePlan | None,
     watch: Watchlist | None,
+    stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     snapshot: dict[str, Any] = {
         "rule_type": rule.rule_type,
@@ -424,8 +697,26 @@ def _snapshot(
         "channel": (rule.params or {}).get("channel") or "feishu",
         "params": {k: v for k, v in (rule.params or {}).items() if k != "state"},
     }
+    if stats:
+        snapshot["stats"] = {
+            key: stats.get(key)
+            for key in (
+                "volume_ratio",
+                "vwap",
+                "vwap_dist",
+                "high20_prev",
+                "ma20",
+                "ma20_slope3",
+                "rsi12",
+                "score",
+                "verdict",
+                "resistance",
+                "resistance_dist",
+            )
+            if stats.get(key) is not None
+        }
     if rule.rule_type == "COMPOSITE":
-        _, detail = eval_composite(rule.params or {}, quote)
+        _, detail = eval_composite(rule.params or {}, quote, stats)
         snapshot["conditions"] = detail
         snapshot["logic"] = (rule.params or {}).get("logic") or "AND"
     if holding is not None:
@@ -456,8 +747,14 @@ def evaluate(
     quotes: dict[str, Quote],
     *,
     moment: datetime | None = None,
+    stats: dict[str, dict[str, Any]] | None = None,
 ) -> list[AlertEvent]:
-    """Evaluate every enabled rule once and return newly triggered events."""
+    """Evaluate every enabled rule once and return newly triggered events.
+
+    ``stats`` carries the per-tick watchlist diagnostics (量比 / 均价 / 技术分).
+    Rules that need them simply skip when a code has no entry, which keeps the
+    monitor working on a fresh database with no daily bars yet.
+    """
     moment = moment or datetime.now()
     trade_date = moment.date()
 
@@ -506,7 +803,12 @@ def evaluate(
             _save_state(rule, state)
             continue
 
-        triggered, threshold = _condition(rule, quote, target if rule.target_type == "holding" else None)
+        triggered, threshold = _condition(
+            rule,
+            quote,
+            target if rule.target_type == "holding" else None,
+            (stats or {}).get(target.code),
+        )
 
         if rule.rule_type == "COMPOSITE":
             params = rule.params or {}
@@ -520,7 +822,7 @@ def evaluate(
 
         if not triggered:
             state["consecutive"] = 0
-            if not state["armed"] and _recovered(rule, quote):
+            if not state["armed"] and _recovered(rule, quote, (stats or {}).get(target.code)):
                 state["armed"] = True
             _save_state(rule, state)
             continue
@@ -562,7 +864,9 @@ def evaluate(
             code=target.code,
             trigger_ts=moment,
             trigger_price=quote.price,
-            condition_snapshot=_snapshot(rule, quote, threshold, holding, plan, watch),
+            condition_snapshot=_snapshot(
+                rule, quote, threshold, holding, plan, watch, (stats or {}).get(target.code)
+            ),
             status="pending",
             dedup_key=_next_dedup_key(session, target.code, rule.rule_type, trade_date),
         )
@@ -638,6 +942,16 @@ def normalize_conditions(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
             raise ValueError("涨跌幅阈值需在 -30% ~ 30% 之间")
         if metric == "turnover_rate" and not 0 <= value <= 100:
             raise ValueError("换手率阈值需在 0 ~ 100 之间")
+        if metric == "volume_ratio" and not 0 <= value <= 30:
+            raise ValueError("量比阈值需在 0 ~ 30 之间")
+        if metric == "vwap_dist" and abs(value) > 30:
+            raise ValueError("分时偏离阈值需在 -30% ~ 30% 之间")
+        if metric == "limit_dist" and not 0 <= value <= 30:
+            raise ValueError("距涨停阈值需在 0 ~ 30% 之间")
+        if metric == "amplitude" and not 0 <= value <= 40:
+            raise ValueError("振幅阈值需在 0 ~ 40% 之间")
+        if metric == "tech_score" and not -20 <= value <= 20:
+            raise ValueError("技术评分阈值需在 -20 ~ 20 之间")
         cleaned.append({"metric": metric, "op": op, "value": value})
 
     if not cleaned:
@@ -763,3 +1077,48 @@ def delete_custom_rule(session: Session, rule_id: int) -> bool:
     session.delete(rule)
     session.commit()
     return True
+
+
+# ------------------------------------------------------------------ builtins
+def builtin_rule_summary() -> list[dict[str, Any]]:
+    """Human-readable list of the automatic watchlist rules (UI + docs)."""
+    return [
+        {
+            "label": "异动（大涨 / 大跌）",
+            "text": f"当日涨跌幅绝对值 ≥ {settings.alert_price_change_pct:g}%",
+            "enabled": True,
+        },
+        {
+            "label": "放量突破",
+            "text": (
+                f"量比 ≥ {settings.alert_breakout_volume_ratio:g}，"
+                f"且价格站上 20 日高点（容忍 {settings.alert_breakout_tolerance_pct:g}% 之内）"
+            ),
+            "enabled": settings.alert_breakout_enabled,
+        },
+        {
+            "label": "分时走强 / 走弱",
+            "text": (
+                f"现价相对当日均价偏离 ±{settings.alert_intraday_strength_pct:g}%，"
+                f"量比 ≥ {settings.alert_intraday_volume_ratio:g}"
+            ),
+            "enabled": settings.alert_intraday_enabled,
+        },
+        {
+            "label": "买入信号",
+            "text": (
+                f"技术评分 ≥ {settings.alert_buy_score} 且看多，"
+                f"RSI ≤ {settings.alert_buy_rsi_max:g}，距压力位 ≥ "
+                f"{settings.alert_buy_resistance_min_pct:g}%"
+            ),
+            "enabled": settings.alert_buy_signal_enabled,
+        },
+        {
+            "label": "回踩买点",
+            "text": (
+                f"价格贴着 MA20（±{settings.alert_pullback_tolerance_pct:g}%），"
+                f"MA20 向上且量比 ≤ {settings.alert_pullback_volume_max:g}"
+            ),
+            "enabled": settings.alert_pullback_enabled,
+        },
+    ]
