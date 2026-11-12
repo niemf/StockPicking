@@ -18,9 +18,19 @@ from app.db.models import Candidate, DailyBar, IndicatorDaily, JobRun, Stock
 from app.providers.base import is_main_board
 from app.services.bars import load_bars_map
 from app.services.calendar import market_session
+from app.services.cycle import compute_cycle
 from app.services.indicators import load_weekly_map
 from app.services.quotes import QuoteService
 from app.services.universe import listed_trading_days, open_dates
+
+
+def _apply_cycle(profile: dict, cycle) -> dict:
+    """Raise the RR floor in climax/ebb phases; never lower it."""
+    risk = dict(profile.get("risk") or {})
+    base = float(risk.get("min_reward_risk", 2.0))
+    risk["min_reward_risk"] = max(base, float(cycle.rr_floor))
+    risk["cycle_phase"] = cycle.phase
+    return {**profile, "risk": risk}
 
 
 def session_progress(moment: datetime | None = None) -> float:
@@ -188,6 +198,11 @@ def run_discovery(
     loaded_codes: set[str] = set()
     bars_seconds = {"value": 0.0}
 
+    # 情绪周期决定「今天用什么门槛」：退潮期把 RR 下限抬到 3.5，
+    # 高潮期抬到 3.0，冰点/修复/发酵维持策略文件里的值。
+    cycle = compute_cycle(session, trade_date=today, quotes=quotes)
+    profile = _apply_cycle(profile, cycle)
+
     def bars_loader(wanted: list[str]) -> dict[str, pd.DataFrame]:
         loaded_codes.update(wanted)
         started_bars = time.perf_counter()
@@ -229,6 +244,7 @@ def run_discovery(
         "pipeline_sec": round(pipeline_seconds, 2),
         "total_sec": round(elapsed, 2),
         "trade_date": today.isoformat(),
+        "cycle": cycle.as_dict(),
     }
     freshness = bars_freshness(session, today=today, moment=moment)
     extra.update(freshness)
