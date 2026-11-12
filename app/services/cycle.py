@@ -146,6 +146,9 @@ def build_metrics(
     return {
         "available": True,
         "total": base["total"],
+        "up": base["up"],
+        "down": base["down"],
+        "flat": base["flat"],
         "limit_up": base["limit_up"],
         "limit_down": base["limit_down"],
         "limit_up_prev": limit_up_prev,

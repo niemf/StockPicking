@@ -91,6 +91,12 @@ def _frame_rows(code: str, df: pd.DataFrame) -> list[dict]:
         close = _as_float(record.get("close"))
         if close is None or close <= 0:
             continue
+        volume = _as_float(record.get("volume"), 0.0) or 0.0
+        amount = _as_float(record.get("amount"), 0.0) or 0.0
+        if amount <= 0 and volume > 0:
+            # 腾讯/新浪的 K 线不带成交额；用 收盘价×成交量 近似，
+            # 量级正确（误差来自当日 VWAP 与收盘价的差），比写 0 有用得多。
+            amount = round(close * volume, 2)
         rows.append(
             {
                 "code": code,
@@ -100,8 +106,8 @@ def _frame_rows(code: str, df: pd.DataFrame) -> list[dict]:
                 "low": _as_float(record.get("low"), close),
                 "close": close,
                 "pre_close": _as_float(record.get("pre_close")),
-                "volume": _as_float(record.get("volume"), 0.0),
-                "amount": _as_float(record.get("amount"), 0.0),
+                "volume": volume,
+                "amount": amount,
                 "turnover_rate": _as_float(record.get("turnover_rate")),
                 "adj_factor": _as_float(record.get("adj_factor"), 1.0),
             }

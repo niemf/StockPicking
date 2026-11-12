@@ -454,6 +454,82 @@ class MarketRegime(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
+class MarketDaily(Base):
+    """每日市场级快照：指数、成交额、涨跌停、炸板率、情绪阶段。
+
+    ``source`` 区分两种来源：``live`` 是收盘后用全市场快照算的精确值，
+    ``bars`` 是从日线反推的近似值（历史回填用，没有盘中炸板数据）。
+    回测按情绪阶段分组时看这一行，而不是每天重算。
+    """
+
+    __tablename__ = "market_daily"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    sh_close: Mapped[float | None] = mapped_column(Float, default=None)
+    sh_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    sz_close: Mapped[float | None] = mapped_column(Float, default=None)
+    sz_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    cyb_close: Mapped[float | None] = mapped_column(Float, default=None)
+    cyb_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    zz1000_close: Mapped[float | None] = mapped_column(Float, default=None)
+    zz1000_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    amount_yi: Mapped[float | None] = mapped_column(Float, default=None)
+    total: Mapped[int | None] = mapped_column(Integer, default=None)
+    up: Mapped[int | None] = mapped_column(Integer, default=None)
+    down: Mapped[int | None] = mapped_column(Integer, default=None)
+    flat: Mapped[int | None] = mapped_column(Integer, default=None)
+    limit_up: Mapped[int | None] = mapped_column(Integer, default=None)
+    limit_down: Mapped[int | None] = mapped_column(Integer, default=None)
+    break_rate: Mapped[float | None] = mapped_column(Float, default=None)
+    max_streak: Mapped[int | None] = mapped_column(Integer, default=None)
+    prev_premium: Mapped[float | None] = mapped_column(Float, default=None)
+    breadth: Mapped[float | None] = mapped_column(Float, default=None)
+    median_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    phase: Mapped[str | None] = mapped_column(String(16), default=None)
+    temperature: Mapped[float | None] = mapped_column(Float, default=None)
+    source: Mapped[str] = mapped_column(String(8), default="live")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
+class SignalLog(Base):
+    """候选/预警的结果跟踪：T+1 / T+3 / T+5、最大浮盈浮亏、止损目标命中。
+
+    这是回答「推荐的票到底值不值得买」的唯一客观依据；回测是事前的，
+    这里是事后的，两者互补。
+    """
+
+    __tablename__ = "signal_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
+    code: Mapped[str] = mapped_column(String(6), index=True)
+    name: Mapped[str] = mapped_column(String(32))
+    source: Mapped[str] = mapped_column(String(16), default="candidate")
+    phase: Mapped[str | None] = mapped_column(String(16), default=None)
+    score: Mapped[float | None] = mapped_column(Float, default=None)
+    rr: Mapped[float | None] = mapped_column(Float, default=None)
+    entry: Mapped[float | None] = mapped_column(Float, default=None)
+    stop: Mapped[float | None] = mapped_column(Float, default=None)
+    target1: Mapped[float | None] = mapped_column(Float, default=None)
+    risk_pct: Mapped[float | None] = mapped_column(Float, default=None)
+    status: Mapped[str] = mapped_column(String(16), default="open")
+    t1_ret: Mapped[float | None] = mapped_column(Float, default=None)
+    t3_ret: Mapped[float | None] = mapped_column(Float, default=None)
+    t5_ret: Mapped[float | None] = mapped_column(Float, default=None)
+    mfe: Mapped[float | None] = mapped_column(Float, default=None)
+    mae: Mapped[float | None] = mapped_column(Float, default=None)
+    r_multiple: Mapped[float | None] = mapped_column(Float, default=None)
+    exit_date: Mapped[date | None] = mapped_column(Date, default=None)
+    exit_price: Mapped[float | None] = mapped_column(Float, default=None)
+    note: Mapped[str | None] = mapped_column(String(64), default=None)
+    tracked_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+    __table_args__ = (
+        UniqueConstraint("trade_date", "code", "source", name="uq_signal_code_day"),
+        Index("ix_signal_status", "status"),
+    )
+
+
 class TradeCalendar(Base):
     """交易日历缓存；盘前同步一次，盘中判断只查本地。"""
 
@@ -497,9 +573,11 @@ __all__ = [
     "IndicatorDaily",
     "JobRun",
     "MarketRegime",
+    "MarketDaily",
     "NotificationLog",
     "Quote",
     "ReviewReport",
+    "SignalLog",
     "Stock",
     "TradePlan",
     "TradeCalendar",

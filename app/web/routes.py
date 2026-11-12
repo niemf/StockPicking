@@ -968,6 +968,24 @@ def candidates_run(db: Session = Depends(get_db)):
     )
 
 
+@router.get("/signals")
+def signals_page(request: Request, db: Session = Depends(get_db)):
+    from app.services.signals import recent, stats
+
+    rows = recent(db, limit=80)
+    summary = stats(db, days=60)
+    return render(
+        request,
+        "signals.html",
+        {
+            "page": "signals",
+            "page_title": "信号跟踪",
+            "rows": rows,
+            "summary": summary,
+        },
+    )
+
+
 @router.get("/plans")
 def plans_page(request: Request, db: Session = Depends(get_db)):
     status = request.query_params.get("status") or None

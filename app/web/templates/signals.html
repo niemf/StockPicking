@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="page-head">
+  <div>
+    <p class="eyebrow">SIGNALS</p>
+    <h1>信号跟踪</h1>
+    <p class="subtitle">
+      每只候选都记录入场价、止损、目标，之后用日线自动结算 T+1 / T+3 / T+5 与最大浮盈浮亏。
+      这是回答「推荐的票到底值不值得买」的唯一客观依据。
+    </p>
+  </div>
+</section>
+
+<section class="stat-grid">
+  <article class="stat-card">
+    <span class="stat-label">信号总数</span>
+    <strong class="stat-value">{{ summary.total or 0 }}</strong>
+    <span class="stat-sub">已结算 {{ summary.resolved or 0 }} · 观察中 {{ summary.open or 0 }}</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">5 日胜率</span>
+    <strong class="stat-value">{{ summary.win_rate if summary.win_rate is not none else '—' }}{% if summary.win_rate is not none %}%{% endif %}</strong>
+    <span class="stat-sub">按 T+5 收盘收益是否为正</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">平均 5 日收益</span>
+    <strong class="stat-value {{ 'up' if (summary.avg_t5 or 0) > 0 else 'down' }}">
+      {{ '%+.2f' | format(summary.avg_t5 or 0) }}%
+    </strong>
+    <span class="stat-sub">最大浮盈 {{ '%+.1f' | format(summary.avg_mfe or 0) }}% · 最大浮亏 {{ '%+.1f' | format(summary.avg_mae or 0) }}%</span>
+  </article>
+  <article class="stat-card">
+    <span class="stat-label">期望（R 倍数）</span>
+    <strong class="stat-value {{ 'up' if (summary.expectancy_r or 0) > 0 else 'down' }}">
+      {{ '%+.2f' | format(summary.expectancy_r or 0) }}R
+    </strong>
+    <span class="stat-sub">收益 ÷ 止损幅度，≥0.2R 才算可用</span>
+  </article>
+</section>
+
+{% if summary.by_phase %}
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>按情绪阶段拆分</h2>
+      <p>同一套规则在不同情绪阶段的期望可能完全相反</p>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr><th>阶段</th><th>样本</th><th>胜率</th><th>平均 5 日</th><th>期望 R</th></tr>
+      </thead>
+      <tbody>
+        {% for phase, item in summary.by_phase.items() %}
+        <tr>
+          <td><span class="cycle-pill {{ phase }}">{{ {'ice': '冰点', 'repair': '修复', 'ferment': '发酵', 'climax': '高潮', 'ebb': '退潮'}.get(phase, phase) }}</span></td>
+          <td>{{ item.count }}</td>
+          <td>{{ item.win_rate if item.win_rate is not none else '—' }}{% if item.win_rate is not none %}%{% endif %}</td>
+          <td class="{{ 'up' if (item.avg_t5 or 0) > 0 else 'down' }}">{{ '%+.2f' | format(item.avg_t5 or 0) }}%</td>
+          <td class="{{ 'up' if (item.expectancy_r or 0) > 0 else 'down' }}">{{ '%+.2f' | format(item.expectancy_r or 0) }}R</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head">
+    <div>
+      <h2>最近信号</h2>
+      <p>入场价 = 信号日收盘；止损/目标按日线最高最低价判断</p>
+    </div>
+    <span class="filter-hint">共 {{ rows | length }} 条</span>
+  </div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>日期</th>
+          <th>股票</th>
+          <th>阶段</th>
+          <th>评分</th>
+          <th>盈亏比</th>
+          <th>入场 / 止损 / 目标</th>
+          <th>T+1</th>
+          <th>T+5</th>
+          <th>浮盈 / 浮亏</th>
+          <th>结果</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ row.trade_date }}</td>
+          <td>
+            <a class="stock-cell" href="/stock/{{ row.code }}">
+              <strong>{{ row.name }}</strong>
+              <small>{{ row.code }}</small>
+            </a>
+          </td>
+          <td>
+            {% if row.phase %}
+            <span class="cycle-pill {{ row.phase }}">{{ {'ice': '冰点', 'repair': '修复', 'ferment': '发酵', 'climax': '高潮', 'ebb': '退潮'}.get(row.phase, row.phase) }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ '%.1f' | format(row.score or 0) }}</td>
+          <td>{% if row.rr %}<span class="rr-badge {{ 'rr-good' if row.rr >= 2.5 else 'rr-ok' }}">{{ '%.2f' | format(row.rr) }}</span>{% else %}—{% endif %}</td>
+          <td><small>{{ row.entry | price }} / {{ row.stop | price }} / {{ row.target1 | price }}</small></td>
+          <td class="{{ 'up' if (row.t1_ret or 0) > 0 else 'down' }}">{{ '%+.2f' | format(row.t1_ret) if row.t1_ret is not none else '—' }}{% if row.t1_ret is not none %}%{% endif %}</td>
+          <td class="{{ 'up' if (row.t5_ret or 0) > 0 else 'down' }}">{{ '%+.2f' | format(row.t5_ret) if row.t5_ret is not none else '—' }}{% if row.t5_ret is not none %}%{% endif %}</td>
+          <td class="muted"><small>{{ '%+.1f' | format(row.mfe or 0) }}% / {{ '%+.1f' | format(row.mae or 0) }}%</small></td>
+          <td>
+            <span class="signal-status {{ row.status }}">
+              {{ {'open': '观察中', 'target': '达标', 'stop': '止损', 'expired': '到期'}.get(row.status, row.status) }}
+            </span>
+            {% if row.r_multiple is not none %}<small>{{ '%+.2f' | format(row.r_multiple) }}R</small>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <section class="empty-state">
+    <strong>还没有信号</strong>
+    <p>先运行一次全市场发现，候选会自动写入跟踪表；之后的日线会自动结算结果。</p>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

@@ -25,11 +25,14 @@ from app.db.models import Stock  # noqa: E402
 from app.providers.base import is_main_board  # noqa: E402
 from app.services.bars import bars_from_snapshot, incremental_bars  # noqa: E402
 from app.services.calendar import is_trading_day, market_session  # noqa: E402
+from app.services.cycle import compute_cycle  # noqa: E402
 from app.services.discovery import run_discovery  # noqa: E402
 from app.services.indicators import rebuild_daily, rebuild_weekly  # noqa: E402
 from app.services.industries import needs_sync, sync_industries  # noqa: E402
 from app.services.limit_board import get_lhb_seats, get_limit_pool  # noqa: E402
+from app.services.market_daily import snapshot as snapshot_market  # noqa: E402
 from app.services.quotes import QuoteService  # noqa: E402
+from app.services.signals import track  # noqa: E402
 from app.services.universe import sync_universe  # noqa: E402
 
 
@@ -102,6 +105,29 @@ def main() -> int:
                 f"指标表：日线 {stats['rows']} 行 / {stats['elapsed_sec']}s，"
                 f"周线 {weekly['rows']} 行"
             )
+
+        # 市场级快照 + 结算前几天的信号（都用刚写好的日线，顺序不能反）
+        try:
+            # 盘中手动运行不写市场行：涨跌停/炸板率会是不完整的半日数据。
+            if market_session() == "after_close" or target < date.today():
+                if quotes is None:
+                    quotes = QuoteService().get_quotes(codes)
+                cycle = compute_cycle(session, trade_date=target, quotes=quotes, refresh=True)
+                market_row = snapshot_market(session, target, cycle=cycle)
+                if market_row is not None:
+                    break_pct = (
+                        f"{market_row.break_rate * 100:.0f}%"
+                        if market_row.break_rate is not None
+                        else "—"
+                    )
+                    print(
+                        f"市场快照：{cycle.label}（{cycle.phase}）· 涨停 {market_row.limit_up} · "
+                        f"炸板率 {break_pct} · 成交 {market_row.amount_yi} 亿"
+                    )
+            tracked = track(session, as_of=target)
+            print(f"信号结算：检查 {tracked['checked']} 条，结算 {tracked['resolved']} 条")
+        except Exception as exc:  # noqa: BLE001 - 市场快照失败不应阻断发现
+            print(f"市场快照/信号结算失败：{exc}")
 
         output = run_discovery(session, quotes=quotes, today=target)
         summary = output["summary"]

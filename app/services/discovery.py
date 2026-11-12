@@ -21,6 +21,7 @@ from app.services.calendar import market_session
 from app.services.cycle import compute_cycle
 from app.services.indicators import load_weekly_map
 from app.services.quotes import QuoteService
+from app.services.signals import record_candidates
 from app.services.universe import listed_trading_days, open_dates
 
 
@@ -258,6 +259,7 @@ def run_discovery(
         )
     if persist:
         _persist_result(session, result, trade_date=today, moment=moment, extra_stats=extra)
+        record_candidates(session, today, result.candidates, phase=cycle.phase)
 
     summary = result.summary()
     summary.update(extra)

@@ -5,7 +5,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\schedule_tasks.ps1 -Remove  # unregister
 #
 # Jobs (Mon-Fri):
-#   08:45  premarket.py --send   premarket briefing -> Feishu
+#   09:15  premarket.py --send   premarket briefing -> Feishu
 #   15:35  daily_update.py       closing snapshot bars + full-market discovery
 #   18:00  daily_review.py       daily review (with AI narrative)
 #
@@ -23,7 +23,7 @@ $logDir = Join-Path $root "data\logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $jobs = @(
-    @{ Name = "TradeAI-Premarket";   Time = "08:45"; Script = "scripts\premarket.py";    Args = "--send" },
+    @{ Name = "TradeAI-Premarket";   Time = "09:15"; Script = "scripts\premarket.py";    Args = "--send" },
     @{ Name = "TradeAI-DailyUpdate"; Time = "15:35"; Script = "scripts\daily_update.py"; Args = "" },
     @{ Name = "TradeAI-DailyReview"; Time = "18:00"; Script = "scripts\daily_review.py"; Args = "" }
 )

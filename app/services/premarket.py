@@ -1,4 +1,4 @@
-"""Pre-market briefing (08:45).
+"""Pre-market briefing (09:15, after the auction opens).
 
 Three inputs, all local and AI-free:
 

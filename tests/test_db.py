@@ -41,6 +41,8 @@ EXPECTED_TABLES = {
     "review_report",
     "stock_report",
     "market_regime",
+    "market_daily",
+    "signal_log",
     "trade_calendar",
     "job_run",
 }

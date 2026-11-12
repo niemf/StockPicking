@@ -23,7 +23,7 @@ from app.services.premarket import build_briefing, send_briefing  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="TradeAI 盘前简报（08:45）")
+    parser = argparse.ArgumentParser(description="TradeAI 盘前简报（09:15）")
     parser.add_argument("--send", action="store_true", help="推送到飞书（默认只打印）")
     parser.add_argument("--force", action="store_true", help="非交易日也发送")
     parser.add_argument("--date", help="简报日期 YYYY-MM-DD（默认今天）")
