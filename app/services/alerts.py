@@ -781,6 +781,9 @@ def evaluate(
     } if plan_ids else {}
 
     events: list[AlertEvent] = []
+    # One card per stock per tick: rules are iterated by priority, so the first
+    # hit wins and the rest are recorded as 已抑制 instead of flooding Feishu.
+    emitted: dict[str, AlertEvent] = {}
     for rule in rules:
         target = holdings.get(rule.target_id) if rule.target_type == "holding" else watches.get(rule.target_id)
         if target is None:
@@ -849,6 +852,7 @@ def evaluate(
                 select(func.count())
                 .select_from(AlertEvent)
                 .where(AlertEvent.dedup_key.like(prefix))
+                .where(AlertEvent.status != "suppressed")
             )
             if int(used or 0) >= daily_cap:
                 state["armed"] = False
@@ -867,7 +871,7 @@ def evaluate(
             condition_snapshot=_snapshot(
                 rule, quote, threshold, holding, plan, watch, (stats or {}).get(target.code)
             ),
-            status="pending",
+            status="pending" if target.code not in emitted else "suppressed",
             dedup_key=_next_dedup_key(session, target.code, rule.rule_type, trade_date),
         )
         session.add(event)
@@ -879,6 +883,9 @@ def evaluate(
             }
         )
         _save_state(rule, state)
+        if target.code in emitted:
+            continue
+        emitted[target.code] = event
         events.append(event)
 
     session.flush()

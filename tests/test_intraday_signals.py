@@ -265,6 +265,33 @@ def test_composite_metric_uses_stats(session) -> None:
     assert triggered is False
 
 
+def test_one_card_per_stock_per_tick(session) -> None:
+    """Two rules hitting the same stock in one tick produce one card + one 已抑制."""
+    add_watch(session, "600036")
+    alerts.ensure_rules(session)
+    for rule in list(session.scalars(select(AlertRule))):
+        if rule.rule_type not in {"BUY_SIGNAL", "VOLUME_BREAKOUT"}:
+            session.delete(rule)
+    session.commit()
+
+    quote = make_quote(price=41.0, pct=2.0)
+    data = {"600036": stats()}
+    alerts.evaluate(session, {"600036": quote}, moment=MOMENT, stats=data)
+    events = alerts.evaluate(session, {"600036": quote}, moment=MOMENT, stats=data)
+
+    assert len(events) == 1
+    assert events[0].condition_snapshot["rule_type"] == "BUY_SIGNAL"
+
+    rows = list(
+        session.scalars(
+            select(AlertEvent).where(AlertEvent.code == "600036").order_by(AlertEvent.id)
+        )
+    )
+    assert [row.status for row in rows] == ["pending", "suppressed"]
+    assert rows[0].condition_snapshot["rule_type"] == "BUY_SIGNAL"
+    assert rows[1].condition_snapshot["rule_type"] == "VOLUME_BREAKOUT"
+
+
 def test_builtin_rule_summary_lists_every_signal() -> None:
     labels = {item["label"] for item in alerts.builtin_rule_summary()}
     assert {"异动（大涨 / 大跌）", "放量突破", "分时走强 / 走弱", "买入信号", "回踩买点"} <= labels
