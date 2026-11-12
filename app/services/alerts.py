@@ -250,6 +250,8 @@ def ensure_rules(session: Session) -> dict[str, int]:
     plans = {
         plan.id: plan
         for plan in session.scalars(select(TradePlan).where(TradePlan.id.in_(plan_ids)))
+        # A rejected or draft plan must never drive live stops or buy-zone alerts.
+        if plan.status == "confirmed"
     } if plan_ids else {}
 
     desired: dict[tuple[str, int, str], dict[str, Any]] = {}
@@ -778,6 +780,7 @@ def evaluate(
     plans = {
         plan.id: plan
         for plan in session.scalars(select(TradePlan).where(TradePlan.id.in_(plan_ids)))
+        if plan.status == "confirmed"
     } if plan_ids else {}
 
     events: list[AlertEvent] = []

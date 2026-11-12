@@ -372,6 +372,11 @@ def reject_plan(session: Session, plan_id: int) -> TradePlan:
     if plan is None:
         raise AIError("交易计划不存在")
     plan.status = "rejected"
+    # Unlink the watch entry so the rejected plan's buy zone / stop stops
+    # generating alerts. The stock itself stays in the watchlist.
+    linked = list(session.scalars(select(Watchlist).where(Watchlist.plan_id == plan.id)))
+    for watch in linked:
+        watch.plan_id = None
     candidate = session.scalar(
         select(Candidate).where(
             Candidate.trade_date == plan.trade_date, Candidate.code == plan.code
