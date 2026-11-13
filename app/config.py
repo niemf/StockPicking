@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # Holdings (cost / P&L) is kept in code but hidden by default: the product
     # is positioned as watch + alert + research, not a portfolio ledger.
     feature_holdings: bool = False
+    # AI trade plans cost money and the backtest shows the current candidate
+    # signal has negative expectancy, so plan generation is off by default.
+    # Turn it on after a signal source passes the backtest acceptance line.
+    feature_ai_plans: bool = False
 
     # Monitoring / alerts
     monitor_enabled: bool = False

@@ -104,6 +104,44 @@ def _redirect(path: str, *, error: str | None = None, ok: str | None = None) -> 
 
 
 # ------------------------------------------------------------------ helpers
+# 回测结论（2026-11-13，212 个交易日）：候选 5 日期望 −0.21R，跑输等权大盘 0.29%。
+# 在找到通过验收线的信号源之前，候选池只作观察名单，不生成买入计划。
+# 改完信号源并通过回测后，把 active 置 false 即可恢复原话术。
+SIGNAL_VERDICT = {
+    "active": True,
+    "date": "2026-11-13",
+    "expectancy_r": -0.21,
+    "edge_pct": -0.29,
+    "text": (
+        "回测结论（212 个交易日）：当前候选信号期望 −0.21R，"
+        "未来 5 日平均跑输等权大盘 0.29%。本页只作观察与跟踪，不构成买入建议。"
+    ),
+}
+
+
+def _watch_notes(item: dict, cycle: dict | None) -> list[str]:
+    """候选卡片上的「为什么现在不能买」——比看多理由更需要看到。"""
+    snapshot = item.get("snapshot") or {}
+    notes: list[str] = []
+    week = snapshot.get("weekly_trend")
+    if week == "down":
+        notes.append("周线空头")
+    deviation = snapshot.get("dev20")
+    if deviation is not None and deviation >= 6:
+        notes.append(f"乖离 MA20 +{deviation:.1f}%")
+    room = snapshot.get("resistance_dist")
+    if room is not None and room < 3:
+        notes.append(f"上方压力仅 {room:.1f}%")
+    if cycle and cycle.get("phase") in {"climax", "ebb"}:
+        notes.append(f"情绪{cycle.get('label')}")
+    score = item.get("score") or 0
+    if score < 50:
+        notes.append(f"评分偏低 {score:.0f}")
+    if not notes:
+        notes.append("结构尚可，等回踩确认")
+    return notes
+
+
 def _trend_class(value: float | None) -> str:
     if value is None or value == 0:
         return "flat"
@@ -907,6 +945,7 @@ def candidates(request: Request, db: Session = Depends(get_db)):
     )
 
     items: list[dict] = []
+    cycle = stats.get("cycle") or {}
     for row in rows:
         snapshot = row.indicator_snapshot or {}
         quote = quotes.get(row.code)
@@ -914,30 +953,30 @@ def candidates(request: Request, db: Session = Depends(get_db)):
         pct_chg = quote.pct_chg if quote else snapshot.get("pct_chg_at_discovery")
         breakdown = snapshot.get("score_breakdown") or {}
         risk = snapshot.get("risk") or {}
-        items.append(
-            {
-                "rank": row.rank,
-                "code": row.code,
-                "name": row.name,
-                "industry": snapshot.get("industry") or "—",
-                "score": row.score,
-                "price": price,
-                "pct_chg": pct_chg or 0.0,
-                "trend": _trend_class(pct_chg),
-                "breakdown": breakdown,
-                "snapshot": snapshot,
-                "risk": risk,
-                "rr": risk.get("rr"),
-                "rule_hits": (row.rule_hits or [])[:6],
-            }
-        )
+        item = {
+            "rank": row.rank,
+            "code": row.code,
+            "name": row.name,
+            "industry": snapshot.get("industry") or "—",
+            "score": row.score,
+            "price": price,
+            "pct_chg": pct_chg or 0.0,
+            "trend": _trend_class(pct_chg),
+            "breakdown": breakdown,
+            "snapshot": snapshot,
+            "risk": risk,
+            "rr": risk.get("rr"),
+            "rule_hits": (row.rule_hits or [])[:6],
+        }
+        item["watch_notes"] = _watch_notes(item, cycle)
+        items.append(item)
 
     return render(
         request,
         "candidates.html",
         {
             "page": "candidates",
-            "page_title": "候选池",
+            "page_title": "候选观察",
             "trade_date": trade_date,
             "items": items,
             "count": len(items),
@@ -947,6 +986,8 @@ def candidates(request: Request, db: Session = Depends(get_db)):
             "error": request.query_params.get("error"),
             "notice": request.query_params.get("ok"),
             "has_key": bool(settings.deepseek_api_key),
+            "plans_enabled": bool(settings.feature_ai_plans),
+            "verdict": SIGNAL_VERDICT,
             "regime": MARKET_REGIME,
         },
     )
@@ -1005,6 +1046,8 @@ def plans_page(request: Request, db: Session = Depends(get_db)):
             "candidate_count": len(candidates),
             "candidate_date": latest_date,
             "has_key": bool(settings.deepseek_api_key),
+            "plans_enabled": bool(settings.feature_ai_plans),
+            "verdict": SIGNAL_VERDICT,
             "error": request.query_params.get("error"),
             "notice": request.query_params.get("ok"),
             "regime": MARKET_REGIME,
@@ -1020,6 +1063,11 @@ def plans_generate(
 ):
     from app.services.ai import AIError
 
+    if not settings.feature_ai_plans:
+        return _redirect(
+            "/plans",
+            error="AI 交易计划已暂停：回测显示当前候选信号期望为负，避免为负期望信号付费。",
+        )
     try:
         result = generate_plans(db, limit=max(1, min(limit, 10)), force=force)
     except AIError as exc:
@@ -1380,6 +1428,11 @@ def api_ai_plans_generate(
 ):
     from app.services.ai import AIError
 
+    if not settings.feature_ai_plans:
+        raise HTTPException(
+            status_code=403,
+            detail="AI 交易计划已暂停（FEATURE_AI_PLANS=false）：当前候选信号回测期望为负。",
+        )
     try:
         result = generate_plans(db, limit=max(1, min(limit, 20)), force=force)
     except AIError as exc:

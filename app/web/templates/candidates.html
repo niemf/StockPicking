@@ -4,7 +4,7 @@
 <section class="page-head">
   <div>
     <p class="eyebrow">DISCOVERY</p>
-    <h1>候选池</h1>
+    <h1>候选观察</h1>
     <p class="subtitle">
       全主板分层筛选：基础池 → 流动性 → 趋势 → 量价 → 动量与风险 → 盈亏比闸门。
       {% if trade_date %}最近一次：{{ trade_date }}{% else %}还没有运行过全市场发现{% endif %}
@@ -25,8 +25,10 @@
     <form method="post" action="/plans/generate"
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='生成中…';">
       <input type="hidden" name="limit" value="5">
-      <button class="btn btn-ghost" type="submit" {% if not has_key or not items %}disabled{% endif %}>
-        生成 Top 5 计划
+      <button class="btn btn-ghost" type="submit"
+              {% if not plans_enabled or not has_key or not items %}disabled{% endif %}
+              title="{% if not plans_enabled %}AI 计划已暂停：回测显示当前候选期望为负{% elif not has_key %}未配置 DEEPSEEK_API_KEY{% endif %}">
+        生成 Top 5 计划{% if not plans_enabled %}（已暂停）{% endif %}
       </button>
     </form>
   </div>
@@ -34,6 +36,12 @@
 
 {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
 {% if notice %}<div class="flash flash-ok">{{ notice }}</div>{% endif %}
+{% if verdict and verdict.active %}
+<div class="flash flash-warn">
+  <strong>{{ verdict.text }}</strong>
+  依据见 <code>docs/回测结论.md</code>；在信号通过验收线之前，卡片上的价位只用于观察与跟踪。
+</div>
+{% endif %}
 {% if stats and stats.bars_stale %}
 <div class="flash flash-error">
   日线数据过期：最新 {{ stats.bars_latest }}，应为 {{ stats.expected_bar_date }}（缺 {{ stats.bars_stale_days }} 个交易日）。
@@ -161,6 +169,11 @@
               <strong>{{ item.name }}</strong>
               <small>{{ item.code }} · {{ item.industry }}</small>
             </a>
+            {% if item.watch_notes %}
+            <div class="watch-notes">
+              {% for note in item.watch_notes[:3] %}<span>{{ note }}</span>{% endfor %}
+            </div>
+            {% endif %}
           </td>
           <td>
             <span class="{{ item.trend }}">{{ item.price | price }}</span>
@@ -180,9 +193,10 @@
           </td>
           {% endfor %}
           <td>
+            <small>观察价位（非买入建议）</small><br>
             {% if item.risk %}
             <small>
-              买 {{ item.risk.entry | price }} · 损 {{ item.risk.stop | price }}（{{ '%.1f' | format(item.risk.stop_pct) }}%）<br>
+              参考 {{ item.risk.entry | price }} · 损 {{ item.risk.stop | price }}（{{ '%.1f' | format(item.risk.stop_pct) }}%）<br>
               目标 {{ item.risk.target1 | price }}（+{{ '%.1f' | format(item.risk.upside_pct) }}%）· 压力 {{ item.risk.resistance | price }}
             </small>
             {% else %}<small>—</small>{% endif %}

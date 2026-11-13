@@ -2354,6 +2354,23 @@ select:focus {
   color: #6b7280;
 }
 
+.watch-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.watch-notes span {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fdf3e7;
+  color: #92580b;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .weekly-row {
   margin-top: 6px;
   padding-top: 10px;

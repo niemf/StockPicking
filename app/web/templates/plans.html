@@ -48,7 +48,14 @@
       <p>候选日期 {{ candidate_date or '—' }} · 当前候选 {{ candidate_count }} 只</p>
     </div>
     {% if not has_key %}<span class="badge badge-warning">未配置 DEEPSEEK_API_KEY</span>{% endif %}
+    {% if not plans_enabled %}<span class="badge badge-warning">AI 计划已暂停</span>{% endif %}
   </div>
+  {% if not plans_enabled %}
+  <div class="flash flash-warn">
+    {{ verdict.text if verdict else '当前候选信号回测期望为负。' }}
+    AI 交易计划默认关闭（<code>FEATURE_AI_PLANS=false</code>）；等信号通过验收线后再打开。
+  </div>
+  {% endif %}
   <form class="inline-form" method="post" action="/plans/generate"
         onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').textContent='生成中…';">
     <div class="field field-sm">
@@ -63,7 +70,7 @@
       <input type="checkbox" name="force" value="true">
       <span>忽略当日缓存重新生成</span>
     </label>
-    <button class="btn btn-primary" type="submit" {% if not has_key %}disabled{% endif %}>
+    <button class="btn btn-primary" type="submit" {% if not has_key or not plans_enabled %}disabled{% endif %}>
       生成 AI 计划
     </button>
     <span class="field-hint">单只约 1–2k 输入 tokens；失败或超预算会停止</span>
