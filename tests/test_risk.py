@@ -118,6 +118,36 @@ def test_target_uses_the_nearest_real_level_above_the_price() -> None:
     assert plan.upside_pct == pytest.approx(6.0, abs=0.1)
 
 
+def test_target_can_be_set_by_reward_risk_multiple() -> None:
+    ctx = make_context(make_bars(flat_then([100.0] * 25)))
+    cfg = {**RISK_CFG, "target_mode": "rr", "target_rr": 1.5, "min_reward_risk": 1.0}
+
+    plan, reason = build_plan(ctx, cfg)
+
+    assert reason is None, reason
+    assert plan is not None
+    assert plan.rr == pytest.approx(1.5, rel=0.01)
+    assert plan.upside_pct == pytest.approx(plan.stop_pct * 1.5, rel=0.01)
+
+
+def test_target_can_be_set_by_atr_multiple() -> None:
+    ctx = make_context(make_bars(flat_then([100.0] * 25)))
+    atr_pct = ctx.feature("atr_pct")
+    cfg = {**RISK_CFG, "target_mode": "atr", "target_atr_mult": 2.0, "min_reward_risk": 1.0}
+
+    plan, reason = build_plan(ctx, cfg)
+
+    assert reason is None, reason
+    assert plan is not None
+    assert plan.upside_pct == pytest.approx(atr_pct * 2.0, rel=0.01)
+
+
+def test_level_mode_is_the_default() -> None:
+    ctx = make_context(make_bars(flat_then([100.0] * 25)))
+    assert build_plan(ctx, RISK_CFG)[0] is not None
+    assert build_plan(ctx, {**RISK_CFG, "target_mode": "level"})[0] is not None
+
+
 def test_plan_needs_volatility_data() -> None:
     ctx = make_context(make_bars([100.0] * 5))
     plan, reason = build_plan(ctx, RISK_CFG)
@@ -204,6 +234,14 @@ def test_stagnation_filter_rejects_heavy_volume_closing_weak() -> None:
     )
 
     assert reason is not None and "下半区" in reason
+
+
+def test_breakout_filter_can_cap_the_extension() -> None:
+    closes = flat_then([100.0] * 20 + [108.0])
+    ctx = make_context(make_bars(closes, highs=[close * 1.0 for close in closes]))
+    # 价格已经比 20 日高点多出 8%，设置上限后应被拒绝
+    assert FILTERS["breakout_20d"].fn(ctx, {"min_ratio": 0.90, "max_ratio": 1.02}) is not None
+    assert FILTERS["breakout_20d"].fn(ctx, {"min_ratio": 0.90, "max_ratio": 1.20}) is None
 
 
 def test_overhead_filter_rejects_a_stock_pinned_under_its_high() -> None:

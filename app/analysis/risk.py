@@ -84,20 +84,34 @@ def build_plan(
     if stop_pct < min_stop_pct:
         return None, "止损过近"
 
-    # A level right above the price caps the upside no matter how strong the
-    # trend looks; the measured move is only used when there is open space.
-    real_level = _nearest_level(ctx, price, min_upside_pct)
-    range_pct = ctx.feature("range20_pct")
-    measured_pct = max(range_pct or 0.0, atr_pct * 2.5, min_upside_pct)
-    measured_pct = min(measured_pct, max_target_pct)
-    if real_level is not None:
-        upside_pct = (real_level / price - 1) * 100
-        target1 = real_level
-        resistance = real_level
-    else:
-        upside_pct = measured_pct
-        target1 = price * (1 + measured_pct / 100)
+    # 目标位三种口径：
+    #   level（默认）—— 上方最近的 20/60 日高，没有则用测量涨幅
+    #   rr           —— 按止损距离的固定倍数（例如 2R），适合短线落袋
+    #   atr          —— 按 ATR 倍数（例如 2×ATR），对波动更自适应
+    target_mode = str(cfg.get("target_mode", "level")).lower()
+    if target_mode == "rr":
+        upside_pct = stop_pct * float(cfg.get("target_rr", 2.0))
+        target1 = price * (1 + upside_pct / 100)
         resistance = target1
+    elif target_mode == "atr":
+        upside_pct = atr_pct * float(cfg.get("target_atr_mult", 2.0))
+        target1 = price * (1 + upside_pct / 100)
+        resistance = target1
+    else:
+        # A level right above the price caps the upside no matter how strong the
+        # trend looks; the measured move is only used when there is open space.
+        real_level = _nearest_level(ctx, price, min_upside_pct)
+        range_pct = ctx.feature("range20_pct")
+        measured_pct = max(range_pct or 0.0, atr_pct * 2.5, min_upside_pct)
+        measured_pct = min(measured_pct, max_target_pct)
+        if real_level is not None:
+            upside_pct = (real_level / price - 1) * 100
+            target1 = real_level
+            resistance = real_level
+        else:
+            upside_pct = measured_pct
+            target1 = price * (1 + measured_pct / 100)
+            resistance = target1
 
     if upside_pct < min_upside_pct:
         return None, f"上方空间不足 {upside_pct:.1f}%"

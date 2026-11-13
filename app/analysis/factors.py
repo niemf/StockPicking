@@ -209,11 +209,14 @@ def _breakout_20d(ctx: StockContext, cfg: dict) -> Reason:
         return "日线不足"
     ratio = ctx.price / high20
     min_ratio = float(cfg.get("min_ratio", 0.97))
+    max_ratio = float(cfg.get("max_ratio", 1.05))
     if ratio < min_ratio:
         # Bucket the ratio so the funnel shows a handful of rows instead of one
         # row per distinct percentage.
         bucket = int(ratio * 100 // 5 * 5)
         return f"距 20 日新高 {bucket}%–{bucket + 5}%"
+    if ratio > max_ratio:
+        return "已远离 20 日新高"
     return None
 
 

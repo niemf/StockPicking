@@ -460,12 +460,20 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 & '.venv\python.exe' scripts\backtest.py --no-cycle
 & '.venv\python.exe' scripts\backtest.py --hold 5 --top 10
 
+# 换一种目标位口径：按止损倍数 / ATR 倍数
+& '.venv\python.exe' scripts\backtest.py --target-mode rr --target-rr 2.0 --hold 5
+& '.venv\python.exe' scripts\backtest.py --target-mode atr --target-atr 3.0 --hold 5
+
 # 导出完整结果（逐笔成交 + 分组统计）
 & '.venv\python.exe' scripts\backtest.py --json data\backtest.json
 ```
 
 输出包含：成交笔数、胜率、期望 R、累计 R、最大回撤、盈亏因子、止损/达标/到期比例、
 平均持有天数，以及**按情绪阶段 / 盈亏比 / 评分分组**的表现。
+
+还有一个关键指标**选股 alpha**：候选「信号日收盘 → 5 日后收盘」的平均涨幅，对比
+**全市场等权**同期平均涨幅。前者减后者就是选股本身的超额收益——如果接近 0，
+说明赚钱与否只取决于止损止盈，选股并没有优势。
 
 上线验收线：**≥30 笔、期望 ≥0.2R、最大回撤 <15R**。达不到的规则不进候选池。
 

@@ -373,6 +373,7 @@ class Trade:
     phase: str | None = None
     score: float = 0.0
     rr_planned: float = 0.0
+    fwd5_pct: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -394,6 +395,7 @@ class Trade:
             "phase": self.phase,
             "score": self.score,
             "rr_planned": round(self.rr_planned, 2),
+            "fwd5_pct": round(self.fwd5_pct, 2) if self.fwd5_pct is not None else None,
         }
 
 
@@ -475,6 +477,7 @@ def summarise(trades: list[Trade]) -> dict:
     wins = [value for value in rs if value > 0]
     losses = [value for value in rs if value <= 0]
     ordered = sorted(done, key=lambda trade: trade.exit_date or trade.signal_date)
+    forward = [trade.fwd5_pct for trade in done if trade.fwd5_pct is not None]
 
     cumulative = 0.0
     peak = 0.0
@@ -503,6 +506,9 @@ def summarise(trades: list[Trade]) -> dict:
         "timeout_rate": round(sum(1 for trade in done if trade.reason == "timeout") / len(done) * 100, 1),
         "avg_mfe_r": round(statistics.fmean([trade.mfe_r for trade in done]), 2),
         "avg_mae_r": round(statistics.fmean([trade.mae_r for trade in done]), 2),
+        # 不看止损/目标，只看「信号日收盘 → 5 日后收盘」的原始涨幅：
+        # 这是判断选股本身有没有 alpha 的关键数字。
+        "avg_fwd5": round(statistics.fmean(forward), 3) if forward else None,
     }
 
 
@@ -514,6 +520,18 @@ def group_by(trades: list[Trade], key) -> dict:
 
 
 # ------------------------------------------------------------------ runner
+def forward_return(panel: CodePanel, idx: int, horizon: int = 5) -> float | None:
+    """信号日收盘 → N 个交易日后收盘的涨幅（不看止损/目标）。"""
+    target = idx + horizon
+    if target >= len(panel.dates):
+        return None
+    start = panel.cols["close"][idx]
+    end = panel.cols["close"][target]
+    if not start or start <= 0 or np.isnan(start) or np.isnan(end):
+        return None
+    return float((end / start - 1) * 100)
+
+
 def run_backtest(
     session: Session,
     *,
@@ -524,8 +542,11 @@ def run_backtest(
     use_cycle: bool = True,
     top_n: int | None = None,
     codes: list[str] | None = None,
+    panels: dict | None = None,
+    by_date: dict | None = None,
 ) -> dict:
-    panels, by_date = load_panels(session, codes=codes)
+    if panels is None or by_date is None:
+        panels, by_date = load_panels(session, codes=codes)
     if not panels:
         return {"summary": {"trades": 0}, "trades": [], "sessions": 0}
 
@@ -540,10 +561,27 @@ def run_backtest(
     sessions = sorted(day for day in by_date if (start is None or day >= start) and (end is None or day <= end))
     trades: list[Trade] = []
     per_day: list[dict] = []
+    universe_forward: list[float] = []
 
     for day in sessions:
         phase = phases.get(day) if use_cycle else None
         picks = screen_day(day, by_date[day], panels, profile, cycle_phase=phase)
+
+        # 全市场等权基准：同一天所有主板股票「收盘 → 5 日后收盘」的平均涨幅。
+        day_returns: list[float] = []
+        for code in by_date[day]:
+            panel = panels.get(code)
+            if panel is None:
+                continue
+            index = panel.index_of(day)
+            if index >= len(panel.dates) or panel.dates[index] != day:
+                continue
+            value = forward_return(panel, index, 5)
+            if value is not None:
+                day_returns.append(value)
+        if day_returns:
+            universe_forward.append(statistics.fmean(day_returns))
+
         for pick in picks:
             panel = panels[pick["code"]]
             trade = simulate(panel, pick["idx"], pick["plan"], max_hold=max_hold)
@@ -551,6 +589,7 @@ def run_backtest(
                 continue
             trade.phase = phase
             trade.score = pick["score"]
+            trade.fwd5_pct = forward_return(panel, pick["idx"], 5)
             trades.append(trade)
         per_day.append({"date": day.isoformat(), "phase": phase, "picks": len(picks)})
 
@@ -558,6 +597,13 @@ def run_backtest(
     summary["sessions"] = len(sessions)
     summary["avg_picks"] = round(statistics.fmean([item["picks"] for item in per_day] or [0]), 1)
     summary["cost_pct"] = ROUND_TRIP_COST_PCT
+    summary["avg_fwd5_universe"] = (
+        round(statistics.fmean(universe_forward), 3) if universe_forward else None
+    )
+    if summary.get("avg_fwd5") is not None and summary["avg_fwd5_universe"] is not None:
+        summary["edge_fwd5"] = round(summary["avg_fwd5"] - summary["avg_fwd5_universe"], 3)
+    else:
+        summary["edge_fwd5"] = None
 
     return {
         "summary": summary,
@@ -583,6 +629,7 @@ __all__ = [
     "CodePanel",
     "PanelContext",
     "Trade",
+    "forward_return",
     "group_by",
     "load_panels",
     "run_backtest",

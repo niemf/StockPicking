@@ -47,6 +47,14 @@ def main() -> int:
     parser.add_argument("--top", type=int, default=None, help="每日候选上限（默认取配置）")
     parser.add_argument("--codes", type=str, default="", help="限定股票，逗号分隔")
     parser.add_argument("--no-cycle", action="store_true", help="不使用情绪周期的 RR 下限")
+    parser.add_argument(
+        "--target-mode",
+        choices=("level", "rr", "atr"),
+        default="",
+        help="目标位口径：level=前高/测量涨幅，rr=止损倍数，atr=ATR 倍数",
+    )
+    parser.add_argument("--target-rr", type=float, default=None, help="--target-mode rr 时的倍数")
+    parser.add_argument("--target-atr", type=float, default=None, help="--target-mode atr 时的倍数")
     parser.add_argument("--profile", type=str, default="", help="策略文件路径")
     parser.add_argument("--json", type=str, default="", help="把完整结果写入 JSON")
     parser.add_argument("--trades", type=int, default=10, help="打印最近 N 笔成交")
@@ -56,6 +64,12 @@ def main() -> int:
     end = date.fromisoformat(args.end) if args.end else None
     codes = [code.strip() for code in args.codes.split(",") if code.strip()] or None
     profile = load_profile(args.profile or None)
+    if args.target_mode:
+        profile.setdefault("risk", {})["target_mode"] = args.target_mode
+    if args.target_rr is not None:
+        profile.setdefault("risk", {})["target_rr"] = args.target_rr
+    if args.target_atr is not None:
+        profile.setdefault("risk", {})["target_atr_mult"] = args.target_atr
 
     with SessionLocal() as session:
         result = run_backtest(
@@ -89,6 +103,11 @@ def main() -> int:
         f"到期 {summary['timeout_rate']}% · 平均最大浮盈 {summary['avg_mfe_r']}R / "
         f"最大浮亏 {summary['avg_mae_r']}R · 成本 {summary['cost_pct']}%"
     )
+    if summary.get("edge_fwd5") is not None:
+        print(
+            f"选股 alpha：候选 5 日 {summary['avg_fwd5']:+.2f}% vs 全市场 "
+            f"{summary['avg_fwd5_universe']:+.2f}% → 超额 {summary['edge_fwd5']:+.2f}%"
+        )
 
     _print_block("按情绪阶段", result["by_phase"])
     _print_block("按盈亏比", result["by_rr"])

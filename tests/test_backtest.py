@@ -180,5 +180,19 @@ def test_summarise_computes_expectancy_and_drawdown() -> None:
     assert summary["target_rate"] == pytest.approx(50.0)
 
 
+def test_forward_return_uses_close_to_close() -> None:
+    from app.backtest import forward_return
+
+    panel = make_panel(
+        opens=[10.0] * 6,
+        highs=[10.1] * 6,
+        lows=[9.9] * 6,
+        closes=[10.0, 10.1, 10.2, 10.3, 10.4, 11.0],
+    )
+
+    assert forward_return(panel, 0, 5) == pytest.approx(10.0)
+    assert forward_return(panel, 2, 5) is None
+
+
 def test_summarise_handles_empty() -> None:
     assert summarise([]) == {"trades": 0}
