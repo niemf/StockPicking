@@ -97,6 +97,7 @@ TradeAI/
 │   │   ├── pipeline.py         # 分层漏斗 + 综合评分 + 盈亏比闸门
 │   │   └── profiles/
 │   │       └── default.yaml    # 阈值与权重（策略配置）
+│   ├── backtest.py             # 历史回测：重放当前漏斗（T+1 开盘成交）
 │   └── web/
 │       ├── routes.py           # 页面路由
 │       ├── templates/          # Jinja2 模板
@@ -115,6 +116,7 @@ TradeAI/
 │   ├── backfill_bars.py        # 日线回补 / 增量更新
 │   ├── build_indicators.py     # 重建 indicator_daily / weekly_bar
 │   ├── backfill_market.py      # 回填 market_daily + 补录候选 + 结算信号
+│   ├── backtest.py             # 历史回测 CLI（--start/--hold/--no-cycle/--json）
 │   ├── verify_bars.py          # 日线覆盖度 / 停牌 / 异常涨跌幅 / 指标落后体检
 │   ├── discover.py             # 全市场技术面发现
 │   ├── generate_plans.py       # 为候选生成 AI 交易计划
@@ -153,6 +155,7 @@ TradeAI/
 │   ├── test_cycle.py           # 情绪周期指标 / 阶段判定 / 仓位联动
 │   ├── test_market_daily.py    # 市场日线回填 / 精确快照 / 幂等
 │   ├── test_signals.py         # 信号记录 / T+N 结算 / 分组统计
+│   ├── test_backtest.py        # 成交撮合 / 止损目标 / 成本与指标汇总
 │   ├── test_discovery.py       # 发现编排 / 日线存储 / 幂等测试
 │   ├── test_ai.py              # AI 客户端 / 预算 / 计划校验 / 复盘测试
 │   └── test_web.py             # 表单增删改 HTTP 流程测试
@@ -434,6 +437,37 @@ FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/...
 | 退潮 | 溢价 ≤−2.5%；或溢价 ≤−1% 且炸板率 ≥50%；或涨停数不足前日 60% | 20% | 3.5 |
 
 发现流程会自动把 `rr_floor` 合进策略文件（只升不降），并在 `/candidates` 顶部显示阶段、情绪温度、六项指标与操作建议。规则推导、量价/MACD/游资手法的取舍都整理在 [`docs/策略规则库.md`](docs/策略规则库.md)。
+
+### 回测（重放当前漏斗）
+
+`app/backtest.py` 不重写策略：过滤器、评分、盈亏比闸门都调用 `app/analysis` 的原函数，
+只是把输入换成指标表里"当天那一行"。所以回测测的就是线上这套逻辑。
+
+成交假设（故意保守）：
+
+- T 日收盘出信号，**T+1 开盘价**成交（不给收盘价成交的便宜）；
+- 开盘已跌破止损或越过目标 → 放弃该笔；
+- 逐日判断先止损还是先目标，同一天两者都触及时按**先止损**；
+- 滑点 0.1% + 手续费 0.03%，买卖各一次，往返 0.26%；
+- 超过 `--hold` 个交易日未触发，按当日收盘平仓。
+
+```powershell
+# 全区间（约 200 个交易日）
+& '.venv\python.exe' scripts\backtest.py
+
+# 指定区间 / 关闭情绪周期门槛 / 缩短持有
+& '.venv\python.exe' scripts\backtest.py --start 2026-06-01 --end 2026-11-12
+& '.venv\python.exe' scripts\backtest.py --no-cycle
+& '.venv\python.exe' scripts\backtest.py --hold 5 --top 10
+
+# 导出完整结果（逐笔成交 + 分组统计）
+& '.venv\python.exe' scripts\backtest.py --json data\backtest.json
+```
+
+输出包含：成交笔数、胜率、期望 R、累计 R、最大回撤、盈亏因子、止损/达标/到期比例、
+平均持有天数，以及**按情绪阶段 / 盈亏比 / 评分分组**的表现。
+
+上线验收线：**≥30 笔、期望 ≥0.2R、最大回撤 <15R**。达不到的规则不进候选池。
 
 ### 市场日线与信号跟踪
 
