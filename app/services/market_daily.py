@@ -131,8 +131,15 @@ def _up_from_breadth(metrics: dict) -> int | None:
     if breadth is None or not total:
         return None
     return int(round(float(breadth) / 100 * total))# ------------------------------------------------------------------ history
-def backfill_from_bars(session: Session, *, days: int = 260) -> dict:
-    """从日线反推历史市场数据（近似），用于回测分组与历史回看。"""
+def backfill_from_bars(
+    session: Session, *, days: int = 260, today: date | None = None
+) -> dict:
+    """从日线反推历史市场数据（近似），用于回测分组与历史回看。
+
+    ``today`` 那天的数据由收盘快照写入（``source='live'``），这里跳过，
+    避免用近似值覆盖精确值。
+    """
+    today = today or date.today()
     started = time.perf_counter()
     statement = (
         select(DailyBar.code, DailyBar.trade_date, DailyBar.close, DailyBar.amount)
@@ -180,7 +187,7 @@ def backfill_from_bars(session: Session, *, days: int = 260) -> dict:
     written = 0
     for day, row in aggregated.iterrows():
         day = day if isinstance(day, date) else day.date()
-        if day == date.today():
+        if day == today:
             continue  # 当天用精确快照覆盖
         total = int(row["total"]) or 1
         metrics = {

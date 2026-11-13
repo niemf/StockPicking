@@ -134,7 +134,18 @@ def build_briefing(
 
     sections: list[dict[str, Any]] = []
 
-    sections.append({"title": "昨日复盘", "lines": _review_lines(previous, day)})
+    # 复盘日期写进标题：如果昨天没跑复盘，这里一眼能看出来，不会把旧结论当新的用。
+    review_title = "昨日复盘"
+    if previous is not None:
+        from app.services.universe import open_dates
+
+        earlier = [item for item in open_dates(session) if item < day]
+        expected = max(earlier) if earlier else None
+        if expected is not None and previous.trade_date < expected:
+            review_title = f"昨日复盘（{previous.trade_date}，非上一交易日）"
+        else:
+            review_title = f"昨日复盘（{previous.trade_date}）"
+    sections.append({"title": review_title, "lines": _review_lines(previous, day)})
 
     if focus:
         focus_lines = [

@@ -124,7 +124,7 @@ def test_build_briefing_sections_and_levels(session) -> None:
     assert briefing["trading_day"] is True
     assert briefing["previous_review"] == PREV.isoformat()
     assert [section["title"] for section in briefing["sections"]] == [
-        "昨日复盘",
+        f"昨日复盘（{PREV.isoformat()}）",
         "今日关注",
         "自选关键价位",
         "纪律提醒",
@@ -147,7 +147,7 @@ def test_build_briefing_sections_and_levels(session) -> None:
     assert any("止损 41.00" in line for line in levels)
 
     assert "盘前简报" in briefing["text"]
-    assert "【昨日复盘】" in briefing["text"]
+    assert "【昨日复盘" in briefing["text"]
     assert render_text("t", [{"title": "x", "lines": ["- y"]}]) == "t\n\n【x】\n- y"
 
 

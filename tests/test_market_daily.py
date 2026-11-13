@@ -129,7 +129,7 @@ def test_backfill_skips_today(session, monkeypatch) -> None:
     session.commit()
     monkeypatch.setattr(md, "index_rows", lambda *a, **k: {})
 
-    md.backfill_from_bars(session, days=5)
+    md.backfill_from_bars(session, days=5, today=TODAY)
 
     assert session.get(MarketDaily, TODAY) is None
 
