@@ -194,5 +194,21 @@ def test_forward_return_uses_close_to_close() -> None:
     assert forward_return(panel, 2, 5) is None
 
 
+def test_simulate_hold_mode_ignores_stop_and_target() -> None:
+    panel = make_panel(
+        opens=[10.0, 10.0, 10.4, 10.8, 10.2, 10.1, 10.0],
+        highs=[10.2, 10.5, 11.2, 11.0, 10.3, 10.2, 10.1],
+        lows=[9.8, 8.5, 10.3, 10.7, 10.0, 9.9, 9.8],
+        closes=[10.0, 10.3, 11.1, 10.9, 10.1, 10.0, 9.9],
+    )
+
+    trade = simulate(panel, 0, plan(), max_hold=5, exit_mode="hold")
+
+    assert trade is not None
+    assert trade.reason == "hold"
+    assert trade.days == 5
+    assert trade.exit_price == pytest.approx(10.0)
+
+
 def test_summarise_handles_empty() -> None:
     assert summarise([]) == {"trades": 0}

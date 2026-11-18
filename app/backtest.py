@@ -405,8 +405,13 @@ def simulate(
     plan: RiskPlan,
     *,
     max_hold: int = 10,
+    exit_mode: str = "plan",
 ) -> Trade | None:
-    """从信号日次日开盘买入，逐日判断止损/目标，返回一笔成交。"""
+    """从信号日次日开盘买入，逐日判断止损/目标，返回一笔成交。
+
+    ``exit_mode="hold"`` 时忽略止损/目标，只在持有期满时按收盘平仓——
+    用来判断「信号本身有没有 edge」，把出场设计的影响剥离掉。
+    """
     entry_idx = signal_idx + 1
     if entry_idx >= len(panel.dates):
         return None
@@ -441,16 +446,21 @@ def simulate(
     exit_price = None
     reason = "open"
     exit_index = entry_idx
-    for index in range(entry_idx, min(entry_idx + max_hold, len(panel.dates))):
-        exit_index = index
-        if lows[index] <= plan.stop:
-            exit_price, reason = float(plan.stop), "stop"
-            break
-        if highs[index] >= plan.target1:
-            exit_price, reason = float(plan.target1), "target"
-            break
-    if exit_price is None:
-        exit_price, reason = float(closes[exit_index]), "timeout"
+    end = min(entry_idx + max_hold, len(panel.dates))
+    if exit_mode == "hold":
+        exit_index = end - 1
+        exit_price, reason = float(closes[exit_index]), "hold"
+    else:
+        for index in range(entry_idx, end):
+            exit_index = index
+            if lows[index] <= plan.stop:
+                exit_price, reason = float(plan.stop), "stop"
+                break
+            if highs[index] >= plan.target1:
+                exit_price, reason = float(plan.target1), "target"
+                break
+        if exit_price is None:
+            exit_price, reason = float(closes[exit_index]), "timeout"
 
     trade.exit_date = panel.dates[exit_index]
     trade.exit_price = exit_price
@@ -503,7 +513,9 @@ def summarise(trades: list[Trade]) -> dict:
         "avg_days": round(statistics.fmean([trade.days for trade in done]), 1),
         "stop_rate": round(sum(1 for trade in done if trade.reason == "stop") / len(done) * 100, 1),
         "target_rate": round(sum(1 for trade in done if trade.reason == "target") / len(done) * 100, 1),
-        "timeout_rate": round(sum(1 for trade in done if trade.reason == "timeout") / len(done) * 100, 1),
+        "timeout_rate": round(
+            sum(1 for trade in done if trade.reason in {"timeout", "hold"}) / len(done) * 100, 1
+        ),
         "avg_mfe_r": round(statistics.fmean([trade.mfe_r for trade in done]), 2),
         "avg_mae_r": round(statistics.fmean([trade.mae_r for trade in done]), 2),
         # 不看止损/目标，只看「信号日收盘 → 5 日后收盘」的原始涨幅：
@@ -544,6 +556,7 @@ def run_backtest(
     codes: list[str] | None = None,
     panels: dict | None = None,
     by_date: dict | None = None,
+    exit_mode: str = "plan",
 ) -> dict:
     if panels is None or by_date is None:
         panels, by_date = load_panels(session, codes=codes)
@@ -584,7 +597,9 @@ def run_backtest(
 
         for pick in picks:
             panel = panels[pick["code"]]
-            trade = simulate(panel, pick["idx"], pick["plan"], max_hold=max_hold)
+            trade = simulate(
+                panel, pick["idx"], pick["plan"], max_hold=max_hold, exit_mode=exit_mode
+            )
             if trade is None:
                 continue
             trade.phase = phase

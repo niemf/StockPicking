@@ -48,6 +48,12 @@ def main() -> int:
     parser.add_argument("--codes", type=str, default="", help="限定股票，逗号分隔")
     parser.add_argument("--no-cycle", action="store_true", help="不使用情绪周期的 RR 下限")
     parser.add_argument(
+        "--exit",
+        choices=("plan", "hold"),
+        default="plan",
+        help="plan=按止损/目标出场；hold=忽略止损目标，持有期满收盘平仓",
+    )
+    parser.add_argument(
         "--target-mode",
         choices=("level", "rr", "atr"),
         default="",
@@ -81,6 +87,7 @@ def main() -> int:
             use_cycle=not args.no_cycle,
             top_n=args.top,
             codes=codes,
+            exit_mode=args.exit,
         )
 
     summary = result["summary"]
