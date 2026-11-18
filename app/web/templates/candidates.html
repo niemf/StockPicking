@@ -136,7 +136,7 @@
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>{{ section.label }} <span class="section-count">{{ section.items | length }} 只</span></h2>
+      <h2>{{ section.label }} <span class="section-count">{{ section.stocks | length }} 只</span></h2>
       <p>{{ section.desc }}</p>
     </div>
     {% if section.validation and section.validation.trades %}
@@ -149,7 +149,7 @@
     <span class="filter-hint">还没有回测验证数据</span>
     {% endif %}
   </div>
-  {% if section.items %}
+  {% if section.stocks %}
   <div class="table-wrap">
     <table class="data-table candidates-table">
       <thead>
@@ -170,7 +170,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for item in section.items %}
+        {% for item in section.stocks %}
         <tr>
           <td><span class="rank-badge">{{ item.rank }}</span></td>
           <td>
@@ -228,7 +228,13 @@
     </table>
   </div>
   {% else %}
-  <p class="section-empty">今天这套口径没有选出股票（条件越严，空仓越正常）。</p>
+  <p class="section-empty">
+    {% if section.key == 'youshi' and stats.cycle and stats.cycle.phase in ['ebb', 'climax'] %}
+    情绪{{ stats.cycle.label }}：游资档自动关闭（不接力、不打板）。
+    {% else %}
+    今天这套口径没有选出股票（条件越严，空仓越正常）。
+    {% endif %}
+  </p>
   {% endif %}
 </section>
 {% endfor %}

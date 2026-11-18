@@ -76,6 +76,10 @@ DEFAULT_THRESHOLDS = {
     "ebb_premium": -2.5,
     "ebb_break_rate": 0.50,
     "ebb_limit_up_drop": 0.5,
+    # 跌停家数 / 宽度 / 中位数：只看涨停容易把"普跌"误判成修复
+    "ebb_limit_down": 40,
+    "ebb_breadth": 25,
+    "ebb_median": -1.5,
     "climax_limit_up": 90,
     "climax_streak": 6,
     "climax_premium": 2.0,
@@ -173,9 +177,23 @@ def classify(metrics: dict, thresholds: dict | None = None) -> str:
     break_rate = metrics.get("break_rate")
     streak = float(metrics.get("max_streak") or 0)
     limit_up_prev = metrics.get("limit_up_prev")
+    limit_down = float(metrics.get("limit_down") or 0)
+    breadth = metrics.get("breadth")
+    median = metrics.get("median_pct")
 
-    # 退潮优先：昨日打板资金已经明显亏钱，任何「看起来强」的票都不该追。
+    # 退潮优先：昨日打板资金已经明显亏钱，或全市场在普跌，任何「看起来强」的票都不该追。
     if premium is not None and premium <= float(cfg["ebb_premium"]):
+        return "ebb"
+    if limit_down >= float(cfg["ebb_limit_down"]):
+        return "ebb"
+    if (
+        breadth is not None
+        and median is not None
+        and float(breadth) <= float(cfg["ebb_breadth"])
+        and float(median) <= float(cfg["ebb_median"])
+    ):
+        return "ebb"
+    if median is not None and float(median) <= float(cfg["ebb_median"]):
         return "ebb"
     if (
         premium is not None

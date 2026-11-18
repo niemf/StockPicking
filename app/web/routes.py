@@ -1033,18 +1033,18 @@ def candidates(request: Request, db: Session = Depends(get_db)):
             "key": "youshi",
             "label": "游资选股",
             "desc": "低位放量启动阳线（Asking 战法）：距 60 日高 <85% + 涨幅≥5% + 首次上穿 MA5。待验证，仅观察。",
-            "items": [_candidate_item(row, quotes.get(row.code), cycle) for row in youshi_rows],
+            "stocks": [_candidate_item(row, quotes.get(row.code), cycle) for row in youshi_rows],
             "validation": validation.get("youshi"),
         },
         {
             "key": "indicator",
             "label": "指标选股",
             "desc": "趋势 + 量价 + 盈亏比闸门。回测显示当前无正 alpha，仅观察。",
-            "items": [_candidate_item(row, quotes.get(row.code), cycle) for row in indicator_rows],
+            "stocks": [_candidate_item(row, quotes.get(row.code), cycle) for row in indicator_rows],
             "validation": validation.get("indicator"),
         },
     ]
-    total = sum(len(section["items"]) for section in sections)
+    total = sum(len(section["stocks"]) for section in sections)
 
     return render(
         request,

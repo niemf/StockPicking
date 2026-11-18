@@ -119,6 +119,35 @@ def test_classify_phases(metrics: dict, expected: str) -> None:
     assert classify(metrics) == expected
 
 
+def test_classify_treats_a_limit_down_wave_as_ebb() -> None:
+    # 涨停还有 36 家，但跌停 45 家、中位数 -1.0%：这是普跌，不是修复
+    metrics = {
+        "available": True,
+        "limit_up": 36,
+        "limit_down": 45,
+        "prev_premium": 0.7,
+        "break_rate": 0.42,
+        "max_streak": 4,
+        "breadth": 30.0,
+        "median_pct": -1.0,
+    }
+    assert classify(metrics) == "ebb"
+
+
+def test_classify_treats_weak_breadth_as_ebb() -> None:
+    metrics = {
+        "available": True,
+        "limit_up": 50,
+        "limit_down": 8,
+        "prev_premium": 0.2,
+        "break_rate": 0.3,
+        "max_streak": 3,
+        "breadth": 20.0,
+        "median_pct": -1.8,
+    }
+    assert classify(metrics) == "ebb"
+
+
 def test_thresholds_are_overridable() -> None:
     metrics = {"available": True, "limit_up": 40, "prev_premium": 2.0, "break_rate": 0.2, "max_streak": 3}
     assert classify(metrics) == "repair"
