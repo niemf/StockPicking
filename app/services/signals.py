@@ -34,6 +34,7 @@ def record_candidates(
     candidates: list[dict],
     *,
     phase: str | None = None,
+    source: str = "candidate",
 ) -> int:
     """把当日候选写进跟踪表（重复运行不会产生重复记录）。"""
     if not candidates:
@@ -41,7 +42,7 @@ def record_candidates(
     existing = set(
         session.scalars(
             select(SignalLog.code).where(
-                SignalLog.trade_date == trade_date, SignalLog.source == "candidate"
+                SignalLog.trade_date == trade_date, SignalLog.source == source
             )
         )
     )
@@ -58,7 +59,7 @@ def record_candidates(
                 trade_date=trade_date,
                 code=code,
                 name=item.get("name") or code,
-                source="candidate",
+                source=source,
                 phase=phase,
                 score=item.get("score"),
                 rr=item.get("rr"),
@@ -155,9 +156,9 @@ def backfill_from_candidates(session: Session, *, days: int = 60) -> int:
     """把历史候选补录进跟踪表（功能上线前的候选也能参与统计）。"""
     cutoff = date.today() - timedelta(days=days)
     existing = {
-        (row[0], row[1])
+        (row[0], row[1], row[2])
         for row in session.execute(
-            select(SignalLog.trade_date, SignalLog.code).where(SignalLog.source == "candidate")
+            select(SignalLog.trade_date, SignalLog.code, SignalLog.source)
         )
     }
     job_phase = {}
@@ -165,7 +166,8 @@ def backfill_from_candidates(session: Session, *, days: int = 60) -> int:
     for row in session.scalars(
         select(Candidate).where(Candidate.trade_date >= cutoff).order_by(Candidate.trade_date)
     ):
-        if (row.trade_date, row.code) in existing:
+        strategy = row.strategy or "candidate"
+        if (row.trade_date, row.code, strategy) in existing:
             continue
         snapshot = row.indicator_snapshot or {}
         risk = snapshot.get("risk") or {}
@@ -181,7 +183,7 @@ def backfill_from_candidates(session: Session, *, days: int = 60) -> int:
                 trade_date=row.trade_date,
                 code=row.code,
                 name=row.name,
-                source="candidate",
+                source=strategy,
                 phase=phase,
                 score=row.score,
                 rr=risk.get("rr"),
@@ -212,18 +214,16 @@ def _phase_for(session: Session, trade_date: date) -> str | None:
     return cycle.get("phase")
 
 
-def stats(session: Session, *, days: int = 60) -> dict:
+def stats(session: Session, *, days: int = 60, source: str | None = None) -> dict:
     """近 N 天信号的表现：胜率、平均收益、期望 R、按阶段拆分。"""
-    rows = list(
-        session.scalars(
-            select(SignalLog)
-            .where(SignalLog.source == "candidate")
-            .order_by(SignalLog.trade_date.desc())
-            .limit(days * 40)
-        )
-    )
+    statement = select(SignalLog).order_by(SignalLog.trade_date.desc()).limit(days * 40)
+    if source:
+        statement = statement.where(SignalLog.source == source)
+    else:
+        statement = statement.where(SignalLog.source.in_(("candidate", "indicator", "youshi")))
+    rows = list(session.scalars(statement))
     if not rows:
-        return {"total": 0, "resolved": 0, "by_phase": {}}
+        return {"total": 0, "resolved": 0, "by_phase": {}, "by_source": {}}
 
     resolved = [row for row in rows if row.status != "open"]
     returns = [row.t5_ret for row in resolved if row.t5_ret is not None]
@@ -264,6 +264,29 @@ def stats(session: Session, *, days: int = 60) -> dict:
             }
             for phase, bucket in by_phase.items()
         },
+    }
+
+    by_source: dict[str, dict] = {}
+    for row in resolved:
+        key = row.source or "candidate"
+        bucket = by_source.setdefault(key, {"count": 0, "returns": [], "rs": []})
+        bucket["count"] += 1
+        if row.t5_ret is not None:
+            bucket["returns"].append(row.t5_ret)
+        if row.r_multiple is not None:
+            bucket["rs"].append(row.r_multiple)
+    summary["by_source"] = {
+        key: {
+            "count": bucket["count"],
+            "win_rate": round(
+                sum(1 for value in bucket["returns"] if value > 0) / len(bucket["returns"]) * 100, 1
+            )
+            if bucket["returns"]
+            else None,
+            "avg_t5": round(statistics.fmean(bucket["returns"]), 2) if bucket["returns"] else None,
+            "expectancy_r": round(statistics.fmean(bucket["rs"]), 2) if bucket["rs"] else None,
+        }
+        for key, bucket in by_source.items()
     }
     return summary
 

@@ -193,6 +193,7 @@ class Candidate(Base):
     trade_date: Mapped[date] = mapped_column(Date, index=True)
     code: Mapped[str] = mapped_column(String(6), index=True)
     name: Mapped[str] = mapped_column(String(32))
+    strategy: Mapped[str] = mapped_column(String(16), default="indicator", index=True)
     score: Mapped[float] = mapped_column(Float, default=0.0)
     rank: Mapped[int] = mapped_column(Integer, default=0)
     rule_hits: Mapped[list[str] | None] = mapped_column(JSON, default=None)
@@ -530,6 +531,30 @@ class SignalLog(Base):
     )
 
 
+class FundamentalReview(Base):
+    """AI 基本面/题材闸门：只对自选股跑，做排除法（veto），不参与打分。
+
+    同一只股票同一天只保留一条；加入自选时触发，也可手动刷新。
+    """
+
+    __tablename__ = "fundamental_review"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(6), index=True)
+    name: Mapped[str] = mapped_column(String(32), default="")
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
+    verdict: Mapped[str] = mapped_column(String(8), default="watch")  # pass/veto/watch
+    score: Mapped[int] = mapped_column(Integer, default=0)  # 0-100
+    tags: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    reasons: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    risks: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    __table_args__ = (UniqueConstraint("code", "trade_date", name="uq_fundamental_code_day"),)
+
+
 class TradeCalendar(Base):
     """交易日历缓存；盘前同步一次，盘中判断只查本地。"""
 
@@ -568,6 +593,7 @@ __all__ = [
     "Base",
     "Candidate",
     "DailyBar",
+    "FundamentalReview",
     "Holding",
     "HoldingTransaction",
     "IndicatorDaily",

@@ -40,6 +40,7 @@ EXPECTED_TABLES = {
     "ai_call_log",
     "review_report",
     "stock_report",
+    "fundamental_review",
     "market_regime",
     "market_daily",
     "signal_log",

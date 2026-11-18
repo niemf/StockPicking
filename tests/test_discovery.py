@@ -14,7 +14,7 @@ from app.db.base import Base
 from app.db.models import Candidate, DailyBar, JobRun, Stock
 from app.providers.base import Quote
 from app.services.bars import bars_from_snapshot, upsert_bars
-from app.services.discovery import load_bars_map, run_discovery, session_progress
+from app.services.discovery import latest_candidates, load_bars_map, run_discovery, session_progress
 
 TODAY = date(2026, 11, 10)
 MOMENT = datetime(2026, 11, 10, 15, 30)
@@ -182,6 +182,26 @@ def test_session_progress() -> None:
     assert session_progress(datetime(2026, 11, 10, 9, 30)) == pytest.approx(0.1)
     assert session_progress(datetime(2026, 11, 10, 11, 30)) < 0.55
     assert session_progress(datetime(2026, 11, 10, 13, 0)) > 0.5
+
+
+def test_latest_candidates_separates_strategies(session) -> None:
+    session.add_all(
+        [
+            Candidate(
+                trade_date=TODAY, code="600000", name="指标票", strategy="indicator", score=70, rank=1
+            ),
+            Candidate(
+                trade_date=TODAY, code="600001", name="游资票", strategy="youshi", score=60, rank=1
+            ),
+        ]
+    )
+    session.commit()
+
+    _, indicator_rows = latest_candidates(session, strategy="indicator")
+    _, youshi_rows = latest_candidates(session, strategy="youshi")
+
+    assert [row.code for row in indicator_rows] == ["600000"]
+    assert [row.code for row in youshi_rows] == ["600001"]
 
 
 def test_run_discovery_persists_candidates(session) -> None:

@@ -142,8 +142,9 @@ class DeepSeekClient:
             ],
             "temperature": temperature,
             "max_tokens": max_tokens,
-            "response_format": {"type": "json_object"},
         }
+        if settings.ai_json_mode:
+            payload["response_format"] = {"type": "json_object"}
 
         last_error: Exception | None = None
         for attempt in range(self.retries):

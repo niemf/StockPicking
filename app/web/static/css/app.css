@@ -2371,6 +2371,96 @@ select:focus {
   white-space: nowrap;
 }
 
+.section-count {
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #eef2f9;
+  color: #4b5568;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.validation-hint {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #475569;
+  background: #f1f5fb;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.section-empty {
+  margin: 6px 0 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------- 基本面徽章 */
+.badge-fund {
+  font-weight: 800;
+}
+
+.badge-fund.pass {
+  background: #fdecec;
+  color: #b42326;
+}
+
+.badge-fund.veto {
+  background: #e8f5ec;
+  color: #15803d;
+}
+
+.badge-fund.watch {
+  background: #fdf6e3;
+  color: #92580b;
+}
+
+.fund-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafd;
+  border: 1px solid #e3e9f4;
+}
+
+.fund-strip.veto {
+  border-color: #f3c6c8;
+  background: #fdf2f2;
+}
+
+.fund-strip.pass {
+  border-color: #f6cdcd;
+}
+
+.fund-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #eef2f9;
+  color: #334155;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.fund-risk {
+  color: #b42326;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.fund-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 2px;
+}
+
 .weekly-row {
   margin-top: 6px;
   padding-top: 10px;

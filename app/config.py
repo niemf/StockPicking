@@ -84,6 +84,8 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     deepseek_timeout_seconds: float = 60.0
+    # 部分 OpenAI 兼容网关不支持 response_format=json_object；关掉后仍会从正文解析 JSON。
+    ai_json_mode: bool = True
     ai_daily_budget_cny: float = 5.0
     ai_input_price_cny: float = 2.0   # 元 / 百万 tokens（按实际价格调整）
     ai_output_price_cny: float = 8.0

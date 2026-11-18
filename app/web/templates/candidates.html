@@ -132,15 +132,24 @@
 </section>
 {% endif %}
 
-{% if items %}
+{% for section in sections %}
 <section class="panel">
   <div class="panel-head">
     <div>
-      <h2>今日候选</h2>
-      <p>评分越高代表趋势、量价与风险结构越均衡</p>
+      <h2>{{ section.label }} <span class="section-count">{{ section.items | length }} 只</span></h2>
+      <p>{{ section.desc }}</p>
     </div>
-    <span class="filter-hint">行情为实时快照，评分基于收盘/最近一根日线</span>
+    {% if section.validation and section.validation.trades %}
+    <span class="validation-hint">
+      近{{ section.validation.sessions or '—' }}日回测：
+      期望 {{ '%+.2f' | format(section.validation.expectancy_r or 0) }}R ·
+      alpha {{ '%+.2f' | format(section.validation.edge_fwd5 or 0) }}%
+    </span>
+    {% else %}
+    <span class="filter-hint">还没有回测验证数据</span>
+    {% endif %}
   </div>
+  {% if section.items %}
   <div class="table-wrap">
     <table class="data-table candidates-table">
       <thead>
@@ -155,13 +164,13 @@
           <th>动量</th>
           <th>相对强度</th>
           <th>波动</th>
-          <th>买点 / 止损 / 目标</th>
+          <th>观察价位 / 止损 / 目标</th>
           <th>关键指标</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
-        {% for item in items %}
+        {% for item in section.items %}
         <tr>
           <td><span class="rank-badge">{{ item.rank }}</span></td>
           <td>
@@ -193,7 +202,6 @@
           </td>
           {% endfor %}
           <td>
-            <small>观察价位（非买入建议）</small><br>
             {% if item.risk %}
             <small>
               参考 {{ item.risk.entry | price }} · 损 {{ item.risk.stop | price }}（{{ '%.1f' | format(item.risk.stop_pct) }}%）<br>
@@ -219,14 +227,19 @@
       </tbody>
     </table>
   </div>
+  {% else %}
+  <p class="section-empty">今天这套口径没有选出股票（条件越严，空仓越正常）。</p>
+  {% endif %}
 </section>
-{% else %}
+{% endfor %}
+
+{% if not count %}
 <section class="empty-state">
-  <strong>候选池为空</strong>
+  <strong>候选为空</strong>
   {% if stats %}
   <p>本次 {{ stats.total_input }} 只股票没有同时满足全部硬条件。可以放宽策略阈值，或查看上方的淘汰原因。</p>
   {% else %}
-  <p>先运行全市场发现。首次使用需要先回补日线：<code>python scripts/backfill_bars.py</code></p>
+  <p>先运行全市场发现。首次使用需要先回补日线：<code>scripts\backfill_bars.py</code></p>
   {% endif %}
 </section>
 {% endif %}

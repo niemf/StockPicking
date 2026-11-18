@@ -84,10 +84,31 @@
         {% if item.has_plan %}
         <span class="badge badge-{{ item.rating_class }}">{{ item.rating }}</span>
         {% endif %}
+        {% if item.fundamental %}
+        <span class="badge badge-fund {{ item.fundamental.verdict }}">
+          基本面 {{ {'pass': '通过', 'veto': '回避', 'watch': '观察'}.get(item.fundamental.verdict) }}
+          · {{ item.fundamental.score }}
+        </span>
+        {% endif %}
         <span class="badge badge-source">{{ item.source }}</span>
         <span class="badge badge-group">{{ item.group }}</span>
       </div>
     </div>
+
+    {% if item.fundamental %}
+    <div class="fund-strip {{ item.fundamental.verdict }}">
+      {% for tag in item.fundamental.tags[:4] %}<span class="fund-tag">{{ tag }}</span>{% endfor %}
+      {% for risk in item.fundamental.risks[:2] %}<span class="fund-risk">⚠ {{ risk }}</span>{% endfor %}
+      <form method="post" action="/watchlist/{{ item.code }}/fundamental">
+        <button class="btn btn-ghost btn-xs" type="submit">刷新</button>
+      </form>
+    </div>
+    {% else %}
+    <form method="post" action="/watchlist/{{ item.code }}/fundamental" class="fund-action">
+      <button class="btn btn-ghost btn-xs" type="submit">AI 基本面</button>
+      <span class="field-hint">加自选后自动分析，每天一次</span>
+    </form>
+    {% endif %}
 
     <div class="watch-price-row">
       <div>

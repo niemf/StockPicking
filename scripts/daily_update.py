@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +33,7 @@ from app.services.limit_board import get_lhb_seats, get_limit_pool  # noqa: E402
 from app.services.market_daily import snapshot as snapshot_market  # noqa: E402
 from app.services.quotes import QuoteService  # noqa: E402
 from app.services.signals import track  # noqa: E402
+from app.services.validation import run_validation  # noqa: E402
 from app.services.universe import sync_universe  # noqa: E402
 
 
@@ -129,7 +130,26 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - 市场快照失败不应阻断发现
             print(f"市场快照/信号结算失败：{exc}")
 
-        output = run_discovery(session, quotes=quotes, today=target)
+        output = run_discovery(session, quotes=quotes, today=target, strategy="indicator")
+        try:
+            youshi = run_discovery(session, quotes=quotes, today=target, strategy="youshi")
+            print(
+                f"游资选股：{len(youshi['candidates'])} 只（{youshi['summary']['survivors']} 只过闸门）"
+            )
+        except Exception as exc:  # noqa: BLE001 - 游资档失败不影响主流程
+            print(f"游资选股失败：{exc}")
+
+        # 收盘后滚动回测验证：两套策略都用最近 60 个交易日评估
+        try:
+            validation = run_validation(session, days=60, moment=datetime.now())
+            for key in ("indicator", "youshi"):
+                item = validation.get(key) or {}
+                print(
+                    f"回测验证[{key}]：{item.get('trades') or 0} 笔 · "
+                    f"期望 {item.get('expectancy_r')}R · alpha {item.get('edge_fwd5')}%"
+                )
+        except Exception as exc:  # noqa: BLE001 - 验证失败不影响选股
+            print(f"回测验证失败：{exc}")
         summary = output["summary"]
         print(
             f"发现完成：{summary['codes']} 只 -> {len(output['candidates'])} 只候选，"

@@ -12,7 +12,12 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.analysis.context import StockContext, StockMeta
-from app.analysis.pipeline import PipelineResult, load_profile, run_pipeline
+from app.analysis.pipeline import (
+    DEFAULT_PROFILE_PATH,
+    PipelineResult,
+    load_profile,
+    run_pipeline,
+)
 from app.config import settings
 from app.db.models import Candidate, DailyBar, IndicatorDaily, JobRun, Stock
 from app.providers.base import is_main_board
@@ -23,6 +28,12 @@ from app.services.indicators import load_weekly_map
 from app.services.quotes import QuoteService
 from app.services.signals import record_candidates
 from app.services.universe import listed_trading_days, open_dates
+
+# 两套选股口径：指标（趋势+量价+盈亏比）与游资（低位放量启动）。
+STRATEGY_PROFILES = {
+    "indicator": DEFAULT_PROFILE_PATH,
+    "youshi": DEFAULT_PROFILE_PATH.parent / "youshi.yaml",
+}
 
 
 def _apply_cycle(profile: dict, cycle) -> dict:
@@ -89,8 +100,13 @@ def _persist_result(
     trade_date: date,
     moment: datetime,
     extra_stats: dict[str, Any],
+    strategy: str = "indicator",
 ) -> None:
-    session.execute(delete(Candidate).where(Candidate.trade_date == trade_date))
+    session.execute(
+        delete(Candidate).where(
+            Candidate.trade_date == trade_date, Candidate.strategy == strategy
+        )
+    )
     for item in result.candidates:
         snapshot = dict(item.get("indicator_snapshot") or {})
         snapshot["score_breakdown"] = item.get("score_breakdown") or {}
@@ -103,6 +119,7 @@ def _persist_result(
                 trade_date=trade_date,
                 code=item["code"],
                 name=item["name"],
+                strategy=strategy,
                 score=float(item["score"]),
                 rank=int(item["rank"]),
                 rule_hits=list(item.get("rule_hits") or []),
@@ -111,7 +128,7 @@ def _persist_result(
             )
         )
 
-    stats = {**result.summary(), **extra_stats}
+    stats = {**result.summary(), **extra_stats, "strategy": strategy}
     job = JobRun(
         job_name="discovery",
         trade_date=trade_date,
@@ -169,6 +186,7 @@ def run_discovery(
     quote_service: QuoteService | None = None,
     quotes: dict | None = None,
     profile: dict | None = None,
+    strategy: str = "indicator",
     today: date | None = None,
     moment: datetime | None = None,
     persist: bool = True,
@@ -181,7 +199,7 @@ def run_discovery(
     """
     today = today or date.today()
     moment = moment or datetime.now()
-    profile = profile or load_profile()
+    profile = profile or load_profile(STRATEGY_PROFILES.get(strategy))
     started = time.perf_counter()
 
     statement = select(Stock).where(Stock.status == "normal").order_by(Stock.code)
@@ -258,8 +276,17 @@ def run_discovery(
             freshness["bars_stale_days"],
         )
     if persist:
-        _persist_result(session, result, trade_date=today, moment=moment, extra_stats=extra)
-        record_candidates(session, today, result.candidates, phase=cycle.phase)
+        _persist_result(
+            session,
+            result,
+            trade_date=today,
+            moment=moment,
+            extra_stats=extra,
+            strategy=strategy,
+        )
+        record_candidates(
+            session, today, result.candidates, phase=cycle.phase, source=strategy
+        )
 
     summary = result.summary()
     summary.update(extra)
@@ -278,18 +305,42 @@ def run_discovery(
     }
 
 
-def latest_candidates(session: Session, limit: int = 100) -> tuple[date | None, list[Candidate]]:
+def run_all_strategies(
+    session: Session,
+    *,
+    quotes: dict | None = None,
+    quote_service: QuoteService | None = None,
+    today: date | None = None,
+    moment: datetime | None = None,
+) -> dict[str, dict]:
+    """跑两套选股（指标 / 游资），共用同一份行情快照。"""
+    if quotes is None:
+        statement = select(Stock).where(Stock.status == "normal").order_by(Stock.code)
+        codes = [stock.code for stock in session.scalars(statement) if is_main_board(stock.code)]
+        quotes = (quote_service or QuoteService()).get_quotes(codes)
+
+    outputs: dict[str, dict] = {}
+    for strategy in STRATEGY_PROFILES:
+        outputs[strategy] = run_discovery(
+            session,
+            quotes=quotes,
+            strategy=strategy,
+            today=today,
+            moment=moment,
+        )
+    return outputs
+
+
+def latest_candidates(
+    session: Session, limit: int = 100, strategy: str | None = None
+) -> tuple[date | None, list[Candidate]]:
     latest = session.scalar(select(Candidate.trade_date).order_by(Candidate.trade_date.desc()).limit(1))
     if latest is None:
         return None, []
-    rows = list(
-        session.scalars(
-            select(Candidate)
-            .where(Candidate.trade_date == latest)
-            .order_by(Candidate.rank)
-            .limit(limit)
-        )
-    )
+    statement = select(Candidate).where(Candidate.trade_date == latest)
+    if strategy:
+        statement = statement.where(Candidate.strategy == strategy)
+    rows = list(session.scalars(statement.order_by(Candidate.rank).limit(limit)))
     return latest, rows
 
 
@@ -300,11 +351,13 @@ def latest_job(session: Session) -> JobRun | None:
 
 
 __all__ = [
+    "STRATEGY_PROFILES",
     "bars_freshness",
     "build_contexts",
     "latest_candidates",
     "latest_job",
     "load_bars_map",
+    "run_all_strategies",
     "run_discovery",
     "session_progress",
 ]

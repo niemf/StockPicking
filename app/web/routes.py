@@ -13,9 +13,10 @@ from datetime import date, datetime, time
 from pathlib import Path
 from urllib.parse import quote as url_quote
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,14 @@ from app.services.announcements import get_announcements
 from app.services import monitor as monitor_service
 from app.services.ai import usage_summary
 from app.services.calendar import session_status, sync_calendar
-from app.services.discovery import latest_candidates, latest_job, run_discovery
+from app.services.discovery import (
+    latest_candidates,
+    latest_job,
+    run_all_strategies,
+    run_discovery,
+)
 from app.services.indicators import load_weekly_map
+from app.services.fundamentals import latest_map
 from app.services.limit_board import get_lhb_seats, get_limit_pool
 from app.services.market_flow import get_lhb, get_sector_flow, get_stock_fund_flow
 from app.services.notifier import condition_text
@@ -61,6 +68,7 @@ from app.services.report_card import (
 )
 from app.services.review import generate_review, recent_reports
 from app.services.tech_snapshot import snapshot_many
+from app.services.validation import latest_validation
 
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -497,9 +505,22 @@ def watchlist(
     codes = [item["code"] for item in all_items]
     tech = snapshot_many(db, codes, quotes)
     cards = latest_reports_for(db, codes)
+    fundamentals = latest_map(db, codes)
     for item in all_items:
         item["tech"] = tech.get(item["code"])
         item["report_card"] = cards.get(item["code"])
+        review = fundamentals.get(item["code"])
+        item["fundamental"] = (
+            {
+                "verdict": review.verdict,
+                "score": review.score,
+                "tags": review.tags or [],
+                "risks": review.risks or [],
+                "date": review.trade_date.isoformat(),
+            }
+            if review is not None
+            else None
+        )
     items = filter_watches(all_items, query=q, group=group)
     in_zone = sum(1 for item in items if item["zone_status"] == "进入建仓区")
     ai_count = sum(1 for item in items if item["source"] == "AI 候选")
@@ -548,6 +569,7 @@ def watchlist_analyze(
 
 @router.post("/watchlist/add")
 def watchlist_add(
+    background: BackgroundTasks,
     code: str = Form(...),
     note: str | None = Form(default=None),
     group_name: str | None = Form(default=None),
@@ -565,7 +587,43 @@ def watchlist_add(
         )
     except PortfolioError as exc:
         return _redirect("/watchlist", error=str(exc))
+
+    # 加入自选后异步跑一次 AI 基本面（每天每只一次，控制成本）
+    if settings.deepseek_api_key:
+        background.add_task(_run_fundamental, row.code)
     return _redirect("/watchlist", ok=f"已添加 {row.name}（{row.code}）")
+
+
+def _run_fundamental(code: str) -> None:
+    """后台任务：独立 session，失败只记日志。"""
+    from app.db.base import SessionLocal
+    from app.services.fundamentals import analyze
+
+    try:
+        with SessionLocal() as session:
+            analyze(session, code)
+    except Exception as exc:  # noqa: BLE001 - 后台任务不能影响请求
+        logger.warning("fundamental analysis failed for {}: {}", code, exc)
+
+
+@router.post("/watchlist/{code}/fundamental")
+def watchlist_fundamental(
+    code: str,
+    force: bool = Form(default=False),
+    db: Session = Depends(get_db),
+):
+    from app.services.ai import AIError
+    from app.services.fundamentals import analyze
+
+    try:
+        row, cached = analyze(db, code, force=force)
+    except (ValueError, AIError) as exc:
+        return _redirect("/watchlist", error=f"基本面分析失败：{exc}")
+    label = {"pass": "通过", "veto": "回避", "watch": "观察"}.get(row.verdict, row.verdict)
+    return _redirect(
+        "/watchlist",
+        ok=f"{row.name} 基本面：{label}（{row.score} 分）" + ("，命中今日缓存" if cached else ""),
+    )
 
 
 @router.post("/watchlist/import")
@@ -934,42 +992,59 @@ def premarket_send(
     return _redirect("/premarket", ok="已推送到飞书")
 
 
+def _candidate_item(row, quote, cycle: dict) -> dict:
+    snapshot = row.indicator_snapshot or {}
+    price = quote.price if quote else snapshot.get("price_at_discovery")
+    pct_chg = quote.pct_chg if quote else snapshot.get("pct_chg_at_discovery")
+    risk = snapshot.get("risk") or {}
+    item = {
+        "rank": row.rank,
+        "code": row.code,
+        "name": row.name,
+        "industry": snapshot.get("industry") or "—",
+        "score": row.score,
+        "price": price,
+        "pct_chg": pct_chg or 0.0,
+        "trend": _trend_class(pct_chg),
+        "breakdown": snapshot.get("score_breakdown") or {},
+        "snapshot": snapshot,
+        "risk": risk,
+        "rr": risk.get("rr"),
+        "rule_hits": (row.rule_hits or [])[:6],
+    }
+    item["watch_notes"] = _watch_notes(item, cycle)
+    return item
+
+
 @router.get("/candidates")
 def candidates(request: Request, db: Session = Depends(get_db)):
-    trade_date, rows = latest_candidates(db, limit=100)
+    trade_date, indicator_rows = latest_candidates(db, limit=100, strategy="indicator")
+    _, youshi_rows = latest_candidates(db, limit=100, strategy="youshi")
     job = latest_job(db)
     stats = (job.stats if job and job.stats else {}) or {}
-
-    quotes = (
-        quote_service.get_quotes([row.code for row in rows]) if rows else {}
-    )
-
-    items: list[dict] = []
     cycle = stats.get("cycle") or {}
-    for row in rows:
-        snapshot = row.indicator_snapshot or {}
-        quote = quotes.get(row.code)
-        price = quote.price if quote else snapshot.get("price_at_discovery")
-        pct_chg = quote.pct_chg if quote else snapshot.get("pct_chg_at_discovery")
-        breakdown = snapshot.get("score_breakdown") or {}
-        risk = snapshot.get("risk") or {}
-        item = {
-            "rank": row.rank,
-            "code": row.code,
-            "name": row.name,
-            "industry": snapshot.get("industry") or "—",
-            "score": row.score,
-            "price": price,
-            "pct_chg": pct_chg or 0.0,
-            "trend": _trend_class(pct_chg),
-            "breakdown": breakdown,
-            "snapshot": snapshot,
-            "risk": risk,
-            "rr": risk.get("rr"),
-            "rule_hits": (row.rule_hits or [])[:6],
-        }
-        item["watch_notes"] = _watch_notes(item, cycle)
-        items.append(item)
+    validation = latest_validation(db)
+
+    codes = [row.code for row in indicator_rows] + [row.code for row in youshi_rows]
+    quotes = quote_service.get_quotes(codes) if codes else {}
+
+    sections = [
+        {
+            "key": "youshi",
+            "label": "游资选股",
+            "desc": "低位放量启动阳线（Asking 战法）：距 60 日高 <85% + 涨幅≥5% + 首次上穿 MA5。待验证，仅观察。",
+            "items": [_candidate_item(row, quotes.get(row.code), cycle) for row in youshi_rows],
+            "validation": validation.get("youshi"),
+        },
+        {
+            "key": "indicator",
+            "label": "指标选股",
+            "desc": "趋势 + 量价 + 盈亏比闸门。回测显示当前无正 alpha，仅观察。",
+            "items": [_candidate_item(row, quotes.get(row.code), cycle) for row in indicator_rows],
+            "validation": validation.get("indicator"),
+        },
+    ]
+    total = sum(len(section["items"]) for section in sections)
 
     return render(
         request,
@@ -978,8 +1053,8 @@ def candidates(request: Request, db: Session = Depends(get_db)):
             "page": "candidates",
             "page_title": "候选观察",
             "trade_date": trade_date,
-            "items": items,
-            "count": len(items),
+            "sections": sections,
+            "count": total,
             "stats": stats,
             "stages": stats.get("stages") or [],
             "job": job,
@@ -996,14 +1071,15 @@ def candidates(request: Request, db: Session = Depends(get_db)):
 @router.post("/candidates/run")
 def candidates_run(db: Session = Depends(get_db)):
     try:
-        output = run_discovery(db)
+        outputs = run_all_strategies(db)
     except Exception as exc:  # noqa: BLE001 - surface a readable message in the UI
         return _redirect("/candidates", error=f"发现失败：{exc}")
-    summary = output["summary"]
+    summary = outputs["indicator"]["summary"]
     return _redirect(
         "/candidates",
         ok=(
-            f"发现完成：{summary['codes']} 只股票 → {len(output['candidates'])} 只候选，"
+            f"发现完成：{summary['codes']} 只股票 → 指标 {len(outputs['indicator']['candidates'])} 只 / "
+            f"游资 {len(outputs.get('youshi', {}).get('candidates', []))} 只，"
             f"用时 {summary['total_sec']} 秒"
         ),
     )

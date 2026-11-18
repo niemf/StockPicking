@@ -105,6 +105,9 @@ _ADDED_COLUMNS: dict[str, dict[str, str]] = {
         "group_name": "VARCHAR(32) DEFAULT '默认'",
         "tags": "JSON",
     },
+    "candidate": {
+        "strategy": "VARCHAR(16) DEFAULT 'indicator'",
+    },
     "indicator_daily": {
         "close": "FLOAT",
         "ma30": "FLOAT",
