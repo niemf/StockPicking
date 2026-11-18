@@ -74,6 +74,20 @@ from app.services.validation import latest_validation
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
+
+def _asset_version() -> str:
+    """静态资源版本号：取 css/js 的最新修改时间，避免浏览器用缓存里的旧脚本。"""
+    static_dir = BASE_DIR / "static"
+    stamps = [
+        path.stat().st_mtime
+        for path in (static_dir / "css" / "app.css", static_dir / "js" / "app.js")
+        if path.exists()
+    ]
+    return str(int(max(stamps))) if stamps else "1"
+
+
+templates.env.globals["asset_version"] = _asset_version()
+
 # ------------------------------------------------------------------ filters
 def _money(value) -> str:
     return "—" if value is None else f"{value:,.2f}"

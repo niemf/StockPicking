@@ -19,9 +19,9 @@
     {% endif %}
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
     {% if funnels %}
-    <button class="btn btn-ghost" type="button" data-drawer="funnel-drawer">
+    <a class="btn btn-ghost" href="#funnel-drawer" data-drawer="funnel-drawer">
       筛选详情（{{ funnels[0].data.total }} → {{ count }}）
-    </button>
+    </a>
     {% endif %}
     <form method="post" action="/candidates/run"
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='扫描中…';">
@@ -230,14 +230,14 @@
 
 {% if funnels %}
 <div class="drawer" id="funnel-drawer" aria-hidden="true">
-  <div class="drawer-backdrop" data-drawer-close></div>
+  <a class="drawer-backdrop" href="#" data-drawer-close aria-label="关闭"></a>
   <aside class="drawer-panel" role="dialog" aria-label="筛选详情">
     <header class="drawer-head">
       <div>
         <h2>筛选详情</h2>
         <p>每一层只处理上一层留下的股票，早期淘汰不加载日线</p>
       </div>
-      <button class="drawer-close" type="button" data-drawer-close aria-label="关闭">×</button>
+      <a class="drawer-close" href="#" data-drawer-close aria-label="关闭">×</a>
     </header>
     <div class="drawer-body">
       {% for funnel in funnels %}

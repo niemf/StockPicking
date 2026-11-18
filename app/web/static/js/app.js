@@ -76,6 +76,10 @@ function closeDrawers() {
     drawer.setAttribute('aria-hidden', 'true');
   });
   document.body.classList.remove('drawer-open');
+  // :target 兜底：清掉 hash，否则抽屉会一直可见
+  if (window.location.hash.startsWith('#funnel-drawer')) {
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
 }
 
 function setupDrawers() {

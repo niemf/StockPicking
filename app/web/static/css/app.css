@@ -2262,9 +2262,23 @@ select:focus {
   visibility: visible;
 }
 
+/* 无 JS 也能打开：按钮是 href="#funnel-drawer"，靠 :target 生效 */
+.drawer:target {
+  visibility: visible;
+}
+
+.drawer:target .drawer-backdrop {
+  opacity: 1;
+}
+
+.drawer:target .drawer-panel {
+  transform: translateX(0);
+}
+
 .drawer-backdrop {
   position: absolute;
   inset: 0;
+  display: block;
   background: rgba(15, 23, 42, 0.35);
   opacity: 0;
   transition: opacity 0.18s ease;
@@ -2323,6 +2337,7 @@ body.drawer-open {
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .drawer-body {
