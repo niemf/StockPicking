@@ -70,9 +70,38 @@ function setupChips() {
   });
 }
 
+function closeDrawers() {
+  document.querySelectorAll('.drawer.open').forEach(drawer => {
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+  });
+  document.body.classList.remove('drawer-open');
+}
+
+function setupDrawers() {
+  document.querySelectorAll('[data-drawer]').forEach(trigger => {
+    trigger.addEventListener('click', () => {
+      const drawer = document.getElementById(trigger.dataset.drawer);
+      if (!drawer) return;
+      drawer.classList.add('open');
+      drawer.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('drawer-open');
+    });
+  });
+
+  document.querySelectorAll('[data-drawer-close]').forEach(trigger => {
+    trigger.addEventListener('click', closeDrawers);
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape') closeDrawers();
+  });
+}
+
 function boot() {
   updateMarketState();
   setupChips();
+  setupDrawers();
   window.setInterval(updateMarketState, 60 * 1000);
 }
 

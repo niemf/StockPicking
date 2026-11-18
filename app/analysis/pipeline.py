@@ -112,6 +112,16 @@ def _enabled(defs: dict, stage: int, filters_cfg: dict) -> list:
     return sorted(selected, key=lambda item: (item.order, item.key))
 
 
+def enabled_filters(profile: dict) -> list[dict]:
+    """当前策略实际启用的硬条件（给页面展示「用了哪些筛选」）。"""
+    filters_cfg = profile.get("filters", {})
+    return [
+        {"stage": stage, "key": definition.key, "label": definition.label}
+        for stage in range(1, 6)
+        for definition in _enabled(FILTERS, stage, filters_cfg)
+    ]
+
+
 # ------------------------------------------------------------------ pipeline
 def run_pipeline(
     contexts: list[StockContext],
@@ -315,6 +325,7 @@ def _snapshot(ctx: StockContext) -> dict:
 __all__ = [
     "PipelineResult",
     "StageStat",
+    "enabled_filters",
     "load_profile",
     "run_pipeline",
 ]

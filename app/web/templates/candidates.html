@@ -18,6 +18,11 @@
     </span>
     {% endif %}
     <span class="regime-pill {{ regime.regime }}">市场风格 · {{ regime.label }}</span>
+    {% if funnels %}
+    <button class="btn btn-ghost" type="button" data-drawer="funnel-drawer">
+      筛选详情（{{ funnels[0].data.total }} → {{ count }}）
+    </button>
+    {% endif %}
     <form method="post" action="/candidates/run"
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='扫描中…';">
       <button class="btn btn-primary" type="submit">运行全市场发现</button>
@@ -26,7 +31,7 @@
           onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').textContent='生成中…';">
       <input type="hidden" name="limit" value="5">
       <button class="btn btn-ghost" type="submit"
-              {% if not plans_enabled or not has_key or not items %}disabled{% endif %}
+              {% if not plans_enabled or not has_key or not count %}disabled{% endif %}
               title="{% if not plans_enabled %}AI 计划已暂停：回测显示当前候选期望为负{% elif not has_key %}未配置 DEEPSEEK_API_KEY{% endif %}">
         生成 Top 5 计划{% if not plans_enabled %}（已暂停）{% endif %}
       </button>
@@ -103,33 +108,6 @@
 </section>
 {% endif %}
 
-<section class="panel funnel-panel">
-  <div class="panel-head">
-    <div>
-      <h2>筛选漏斗</h2>
-      <p>每一层只处理上一层留下的股票，早期淘汰不加载日线</p>
-    </div>
-    {% if job %}<span class="filter-hint">任务 #{{ job.id }} · {{ job.status }}</span>{% endif %}
-  </div>
-  <div class="funnel">
-    {% for stage in stages %}
-    <div class="funnel-step">
-      <span class="funnel-index">{{ stage.stage }}</span>
-      <strong>{{ stage.name }}</strong>
-      <span class="funnel-count">{{ stage.input }} → {{ stage.passed }}</span>
-      <span class="funnel-time">{{ stage.elapsed_ms }} ms</span>
-      {% if stage.rejections %}
-      <div class="funnel-reject">
-        {% for reason, count in stage.rejections.items() %}
-        <span>{{ reason }} {{ count }}</span>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </div>
-    {% if not loop.last %}<span class="funnel-arrow">→</span>{% endif %}
-    {% endfor %}
-  </div>
-</section>
 {% endif %}
 
 {% for section in sections %}
@@ -243,10 +221,66 @@
 <section class="empty-state">
   <strong>候选为空</strong>
   {% if stats %}
-  <p>本次 {{ stats.total_input }} 只股票没有同时满足全部硬条件。可以放宽策略阈值，或查看上方的淘汰原因。</p>
+  <p>本次 {{ stats.total_input }} 只股票没有同时满足全部硬条件。可以放宽策略阈值，或点击右上角「筛选详情」查看淘汰原因。</p>
   {% else %}
   <p>先运行全市场发现。首次使用需要先回补日线：<code>scripts\backfill_bars.py</code></p>
   {% endif %}
 </section>
+{% endif %}
+
+{% if funnels %}
+<div class="drawer" id="funnel-drawer" aria-hidden="true">
+  <div class="drawer-backdrop" data-drawer-close></div>
+  <aside class="drawer-panel" role="dialog" aria-label="筛选详情">
+    <header class="drawer-head">
+      <div>
+        <h2>筛选详情</h2>
+        <p>每一层只处理上一层留下的股票，早期淘汰不加载日线</p>
+      </div>
+      <button class="drawer-close" type="button" data-drawer-close aria-label="关闭">×</button>
+    </header>
+    <div class="drawer-body">
+      {% for funnel in funnels %}
+      {% set data = funnel.data %}
+      <section class="funnel-block">
+        <div class="funnel-block-head">
+          <strong>{{ funnel.label }}</strong>
+          <span>{{ data.total }} → {{ data.final }} 只 · {{ '%.0f' | format(data.elapsed_ms) }} ms</span>
+        </div>
+
+        {% if data.filters %}
+        <div class="filter-chips">
+          <span class="filter-chips-label">启用条件 {{ data.filters | length }} 项</span>
+          {% for item in data.filters %}<span class="filter-chip">{{ item.label }}</span>{% endfor %}
+        </div>
+        {% endif %}
+
+        <ol class="funnel-list">
+          {% for stage in data.stages %}
+          <li class="funnel-row">
+            <div class="funnel-row-head">
+              <span class="funnel-index">{{ stage.stage }}</span>
+              <strong>{{ stage.name }}</strong>
+              <span class="funnel-count">{{ stage.input }} → {{ stage.passed }}</span>
+              <span class="funnel-time">{{ '%.0f' | format(stage.elapsed_ms) }} ms</span>
+            </div>
+            {% if stage.reasons %}
+            <div class="funnel-reasons">
+              {% for item in stage.reasons %}
+              <span class="funnel-reason">{{ item.label }}<b>{{ item.count }}</b></span>
+              {% endfor %}
+              {% if stage.others %}
+              <span class="funnel-reason muted">其他 {{ stage.others }} 类<b>{{ stage.others_count }}</b></span>
+              {% endif %}
+            </div>
+            {% endif %}
+          </li>
+          {% endfor %}
+        </ol>
+      </section>
+      {% endfor %}
+    </div>
+  </aside>
+</div>
 {% endif %}
 {% endblock %}

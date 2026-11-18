@@ -36,6 +36,7 @@ from app.services.discovery import (
     run_all_strategies,
     run_discovery,
 )
+from app.web.funnel import build as build_funnel
 from app.services.indicators import load_weekly_map
 from app.services.fundamentals import latest_map
 from app.services.limit_board import get_lhb_seats, get_limit_pool
@@ -1020,10 +1021,16 @@ def _candidate_item(row, quote, cycle: dict) -> dict:
 def candidates(request: Request, db: Session = Depends(get_db)):
     trade_date, indicator_rows = latest_candidates(db, limit=100, strategy="indicator")
     _, youshi_rows = latest_candidates(db, limit=100, strategy="youshi")
-    job = latest_job(db)
+    job = latest_job(db, strategy="indicator") or latest_job(db)
     stats = (job.stats if job and job.stats else {}) or {}
     cycle = stats.get("cycle") or {}
     validation = latest_validation(db)
+    funnels = []
+    for key, label in (("indicator", "指标选股"), ("youshi", "游资选股")):
+        funnel_job = job if key == "indicator" else latest_job(db, strategy=key)
+        data = build_funnel((funnel_job.stats if funnel_job and funnel_job.stats else None))
+        if data:
+            funnels.append({"key": key, "label": label, "data": data})
 
     codes = [row.code for row in indicator_rows] + [row.code for row in youshi_rows]
     quotes = quote_service.get_quotes(codes) if codes else {}
@@ -1057,6 +1064,7 @@ def candidates(request: Request, db: Session = Depends(get_db)):
             "count": total,
             "stats": stats,
             "stages": stats.get("stages") or [],
+            "funnels": funnels,
             "job": job,
             "error": request.query_params.get("error"),
             "notice": request.query_params.get("ok"),

@@ -15,6 +15,7 @@ from app.analysis.context import StockContext, StockMeta
 from app.analysis.pipeline import (
     DEFAULT_PROFILE_PATH,
     PipelineResult,
+    enabled_filters,
     load_profile,
     run_pipeline,
 )
@@ -264,6 +265,7 @@ def run_discovery(
         "total_sec": round(elapsed, 2),
         "trade_date": today.isoformat(),
         "cycle": cycle.as_dict(),
+        "filters": enabled_filters(profile),
     }
     freshness = bars_freshness(session, today=today, moment=moment)
     extra.update(freshness)
@@ -344,10 +346,17 @@ def latest_candidates(
     return latest, rows
 
 
-def latest_job(session: Session) -> JobRun | None:
-    return session.scalar(
-        select(JobRun).where(JobRun.job_name == "discovery").order_by(JobRun.started_at.desc()).limit(1)
+def latest_job(session: Session, strategy: str | None = None) -> JobRun | None:
+    statement = (
+        select(JobRun)
+        .where(JobRun.job_name == "discovery")
+        .order_by(JobRun.started_at.desc())
+        .limit(20 if strategy else 1)
     )
+    for job in session.scalars(statement):
+        if strategy is None or (job.stats or {}).get("strategy", "indicator") == strategy:
+            return job
+    return None
 
 
 __all__ = [
