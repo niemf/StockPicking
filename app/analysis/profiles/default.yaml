@@ -97,6 +97,18 @@ filters:
     min_room_pct: 3.0        # 未突破前，距 20 日高点至少 3%
     min_room_pct_above_high: 0.0   # 已创新高时不限制
 
+  # 游资战术（app/analysis/profiles/youshi.yaml 里单独打开）
+  # 新过滤器默认会被视为启用，所以这里必须显式关闭，避免影响默认漏斗。
+  low_position:
+    enabled: false
+    max_ratio: 0.85
+
+  launch_candle:
+    enabled: false
+    min_pct: 5.0
+    min_volume_ratio: 1.5
+    require_cross: true
+
 scoring:
   trend:
     weight: 30

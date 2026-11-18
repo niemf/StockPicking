@@ -1,0 +1,135 @@
+# 游资战术 v0（Asking 语录蒸馏版）
+#
+# 核心思路（来自 Asking）：
+#   1. 「相对低位的第一根放量大阳线」——只买启动，不买已经拉高的；
+#   2. 「第一次放量上穿 5 日线」——启动日入场，不在半山腰追；
+#   3. 「90% 以上的操作第二天结束」——短持有，出入要快。
+#
+# 与 default.yaml 的区别：
+#   - 关掉「贴近 20 日新高」「MA20 向上」「RSI 45-70」这些追强势的条件；
+#   - 换成「距 60 日高点 <85%」+「涨幅 >5% 且首次上穿 MA5 且放量」；
+#   - 目标改成 2R 固定倍数，持有期默认 5 天。
+#
+# 注意：这是**待验证**的策略档，跑回测通过验收线（≥30 笔、期望 ≥0.2R）才可用。
+
+universe:
+  min_list_days: 60
+  exclude_st: true
+
+filters:
+  price_range:
+    enabled: true
+    min_price: 2.0
+    max_price: 1000.0
+
+  liquidity:
+    enabled: true
+    min_amount: 80000000   # 8000 万，启动日量能要够
+    min_turnover: 1.0
+    max_turnover: 20.0
+
+  limit_state:
+    enabled: true
+
+  limit_extreme:
+    enabled: true
+    max_limit_up_streak: 2
+    max_gap_down_pct: -7.0
+
+  ma20_trend:
+    enabled: false         # 启动日不要求 MA20 已经向上
+
+  ma_alignment:
+    enabled: false
+
+  volume_ratio:
+    enabled: false         # 由 launch_candle 统一判定
+
+  breakout_20d:
+    enabled: false         # 与「低位」互斥
+
+  rsi12:
+    enabled: false         # 启动日 RSI 会瞬间抬高
+
+  macd_positive:
+    enabled: false
+
+  atr_pct:
+    enabled: true
+    min: 2.0
+    max: 9.0
+
+  max_gain_20d:
+    enabled: false
+
+  max_drawdown_20d:
+    enabled: true
+    max: 25.0
+
+  gap_down:
+    enabled: true
+    max_pct: -5.0
+
+  extension:
+    enabled: false         # 启动日本身可能偏离 MA20
+
+  run_up:
+    enabled: true
+    max_ret5_pct: 18.0
+    max_up_streak: 4
+
+  upper_shadow:
+    enabled: true
+    lookback: 3
+    max_shadow_pct: 4.0
+    min_volume_ratio: 1.5
+    min_hits: 1
+
+  stagnation:
+    enabled: true
+    min_volume_ratio: 2.5
+    max_close_position: 0.5
+
+  overhead:
+    enabled: false
+
+  low_position:
+    enabled: true
+    max_ratio: 0.85        # 距 60 日高点 15% 以上
+
+  launch_candle:
+    enabled: true
+    min_pct: 5.0           # 当日涨幅 ≥5%
+    min_volume_ratio: 1.5
+    require_cross: true    # 首次上穿 MA5
+
+scoring:
+  trend:
+    weight: 20
+  volume_price:
+    weight: 35
+    ideal_volume_ratio: 2.0
+  momentum:
+    weight: 15
+  relative_strength:
+    weight: 20
+  volatility:
+    weight: 10
+    ideal_atr_pct: 3.5
+
+risk:
+  enabled: true
+  atr_mult: 1.2
+  ma20_buffer: 0.01
+  min_stop_pct: 1.5
+  max_stop_pct: 8.0
+  min_upside_pct: 3.0
+  max_target_pct: 25.0
+  min_reward_risk: 2.0
+  target_mode: rr
+  target_rr: 2.0
+  target2_extension: 1.618
+  rr_bonus_cap: 10.0
+
+output:
+  top_n: 10

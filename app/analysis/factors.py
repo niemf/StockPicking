@@ -408,6 +408,63 @@ def _overhead(ctx: StockContext, cfg: dict) -> Reason:
     return None
 
 
+@hard_filter(
+    "low_position",
+    4,
+    "相对低位",
+    requires=("high60_prev",),
+    order=5,
+)
+def _low_position(ctx: StockContext, cfg: dict) -> Reason:
+    """游资「相对低位的第一根放量大阳线」里的位置条件。
+
+    只买还没大幅拉升的票：距 60 日高点越远，后续空间越大。用 60 日高点而不是
+    20 日，是因为 20 日高点太近，会把「刚启动」误判成「已在高位」。
+    """
+    high60 = ctx.feature("high60_prev")
+    if not high60 or high60 <= 0:
+        return "日线不足"
+    ratio = ctx.price / high60
+    if ratio > float(cfg.get("max_ratio", 0.85)):
+        return f"距 60 日高点 {ratio * 100:.0f}%"
+    return None
+
+
+@hard_filter(
+    "launch_candle",
+    4,
+    "放量启动阳线",
+    requires=("pct_chg", "volume_ratio", "ma5"),
+    order=6,
+)
+def _launch_candle(ctx: StockContext, cfg: dict) -> Reason:
+    """「第一次放量上穿 5 日线」：启动日买，不在半山腰追。
+
+    ``require_cross`` 为真时要求昨日收盘在 MA5 下方、今日收在上方，
+    这样筛掉的是「已经在趋势里」的票，只留刚点火的那一根。
+    """
+    pct_chg = ctx.pct_chg
+    ratio = ctx.feature("volume_ratio")
+    ma5 = ctx.feature("ma5")
+    if ratio is None or ma5 is None:
+        return "日线不足"
+    min_pct = float(cfg.get("min_pct", 5.0))
+    if pct_chg < min_pct:
+        return f"涨幅不足 {pct_chg:.1f}%"
+    if ratio < float(cfg.get("min_volume_ratio", 1.5)):
+        return f"量比不足 {ratio:.1f}"
+    if cfg.get("require_cross", True):
+        prev_close = ctx.feature("close", 1)
+        prev_ma5 = ctx.feature("ma5", 1)
+        if None in (prev_close, prev_ma5):
+            return "日线不足"
+        if not (prev_close < prev_ma5 and ctx.price > ma5):
+            return "不是首次上穿 MA5"
+    elif ctx.price < ma5:
+        return "价格低于 MA5"
+    return None
+
+
 # ------------------------------------------------------------------ scores
 @scorer("trend", "趋势强度", requires=("ma5", "ma10", "ma20", "ma60", "ma20_slope3"), order=10)
 def _trend_score(ctx: StockContext, cfg: dict) -> float:

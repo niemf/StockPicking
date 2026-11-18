@@ -244,6 +244,43 @@ def test_breakout_filter_can_cap_the_extension() -> None:
     assert FILTERS["breakout_20d"].fn(ctx, {"min_ratio": 0.90, "max_ratio": 1.20}) is None
 
 
+def test_low_position_filter_requires_room_below_the_high() -> None:
+    closes = flat_then([100.0] * 20 + [75.0])
+    ctx = make_context(make_bars(closes, highs=[close * 1.0 for close in closes]))
+    # 现价 75，60 日高点 100 -> 75%，属于低位
+    assert FILTERS["low_position"].fn(ctx, {"max_ratio": 0.85}) is None
+    assert FILTERS["low_position"].fn(ctx, {"max_ratio": 0.70}) is not None
+
+
+def test_launch_candle_requires_first_cross_and_volume() -> None:
+    # 横盘 → 缩量回踩 4 天 → 放量涨 8% 首次上穿 MA5
+    closes = flat_then([100.0] * 16 + [98.0] * 4 + [106.0])
+    volumes = [1_000_000.0] * 110 + [3_000_000.0]
+    bars = make_bars(closes, volumes=volumes, highs=[close * 1.005 for close in closes])
+    ctx = make_context(bars)
+
+    cfg = {"min_pct": 5.0, "min_volume_ratio": 1.5, "require_cross": True}
+
+    assert ctx.pct_chg > 5.0
+    assert FILTERS["launch_candle"].fn(ctx, cfg) is None
+
+    # 已经是趋势中（前一日也在 MA5 上方）则不满足"首次上穿"
+    trending = flat_then([100.0 * (1.06**step) for step in range(6)])
+    trend_volumes = [1_000_000.0] * (len(trending) - 1) + [3_000_000.0]
+    trend_bars = make_bars(trending, volumes=trend_volumes)
+    trend_ctx = make_context(trend_bars)
+    assert FILTERS["launch_candle"].fn(trend_ctx, cfg) == "不是首次上穿 MA5"
+    assert FILTERS["launch_candle"].fn(trend_ctx, {**cfg, "require_cross": False}) is None
+
+
+def test_launch_candle_rejects_small_moves() -> None:
+    closes = flat_then([100.0] * 24 + [101.0])
+    bars = make_bars(closes, volumes=[3_000_000.0] * len(closes))
+    ctx = make_context(bars)
+    reason = FILTERS["launch_candle"].fn(ctx, {"min_pct": 5.0, "min_volume_ratio": 1.5})
+    assert reason is not None and "涨幅不足" in reason
+
+
 def test_overhead_filter_rejects_a_stock_pinned_under_its_high() -> None:
     closes = flat_then([100.0] * 20 + [99.0])
     highs = [close * 1.0 for close in closes]
