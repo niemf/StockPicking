@@ -18,8 +18,8 @@ from app.db.models import SectorFlowSample
 from app.services.calendar import is_polling_time, now_local
 from app.services.market_flow import get_sector_flow
 
-SAMPLE_MINUTES = 5
-KEEP_DAYS = 20
+SAMPLE_MINUTES = 3
+KEEP_DAYS = 1  # 只保留当日，开盘后第一次采样时清空前一日
 
 # 曲线配色：流入暖色、流出冷色，和参考图一致
 COLORS = ["#f0533f", "#f08a3f", "#f0b13f", "#ef6a86", "#c95fd0",
@@ -56,26 +56,43 @@ def sample(
     if not payload.get("available"):
         return 0
 
+    # 每日开盘清空：只保留当天数据，避免表越滚越大
+    from sqlalchemy import delete
+
+    session.execute(delete(SectorFlowSample).where(SectorFlowSample.trade_date < day))
+
     ts = moment.replace(second=0, microsecond=0)
-    written = 0
+    rows = []
     for row in payload.get("rows") or []:
         value = row.get("net_inflow_yi")
         if value is None:
             continue
-        session.merge(
-            SectorFlowSample(
-                trade_date=day,
-                ts=ts,
-                sector=str(row.get("name") or "")[:32],
-                net_inflow=float(value),
-                pct_chg=float(row["pct_chg"]) if row.get("pct_chg") is not None else None,
-            )
+        rows.append(
+            {
+                "trade_date": day,
+                "ts": ts,
+                "sector": str(row.get("name") or "")[:32],
+                "net_inflow": float(value),
+                "pct_chg": float(row["pct_chg"]) if row.get("pct_chg") is not None else None,
+            }
         )
-        written += 1
+    if rows:
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        statement = sqlite_insert(SectorFlowSample).values(rows)
+        statement = statement.on_conflict_do_update(
+            index_elements=["ts", "sector"],
+            set_={
+                "net_inflow": statement.excluded.net_inflow,
+                "pct_chg": statement.excluded.pct_chg,
+                "trade_date": statement.excluded.trade_date,
+            },
+        )
+        session.execute(statement)
     session.commit()
-    if written:
-        logger.info("sector flow sampled: {} sectors at {}", written, ts.strftime("%H:%M"))
-    return written
+    if rows:
+        logger.info("sector flow sampled: {} sectors at {}", len(rows), ts.strftime("%H:%M"))
+    return len(rows)
 
 
 def prune(session: Session, *, keep_days: int = KEEP_DAYS) -> int:

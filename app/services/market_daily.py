@@ -255,8 +255,11 @@ def load_history(session: Session, start: date | None = None, days: int = 60) ->
     return list(reversed(rows))
 
 
-def latest(session: Session) -> MarketDaily | None:
-    return session.scalar(select(MarketDaily).order_by(MarketDaily.trade_date.desc()).limit(1))
+def latest(session: Session, before: date | None = None) -> MarketDaily | None:
+    statement = select(MarketDaily).order_by(MarketDaily.trade_date.desc()).limit(1)
+    if before is not None:
+        statement = statement.where(MarketDaily.trade_date < before)
+    return session.scalar(statement)
 
 
 def phase_counts(session: Session, days: int = 120) -> dict[str, int]:

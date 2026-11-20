@@ -60,9 +60,32 @@ def test_sample_writes_rows_and_throttles(session, monkeypatch) -> None:
     assert sector_flow.sample(session, moment=moment + timedelta(minutes=1)) == 0
     assert calls["count"] == 1
 
-    # 五分钟后允许再采
-    assert sector_flow.sample(session, moment=moment + timedelta(minutes=6)) == 2
+    # 三分钟后允许再采
+    assert sector_flow.sample(session, moment=moment + timedelta(minutes=3)) == 2
     assert calls["count"] == 2
+
+
+def test_sample_clears_previous_days(session, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sector_flow, "get_sector_flow", lambda day, refresh=False: payload([("半导体", -80.0)])
+    )
+    monkeypatch.setattr(sector_flow, "is_polling_time", lambda moment=None: True)
+
+    session.add(
+        SectorFlowSample(
+            trade_date=DAY - timedelta(days=1),
+            ts=datetime(2026, 11, 19, 14, 0),
+            sector="旧板块",
+            net_inflow=1.0,
+        )
+    )
+    session.commit()
+
+    sector_flow.sample(session, moment=datetime(2026, 11, 20, 9, 35))
+
+    rows = list(session.scalars(select(SectorFlowSample)))
+    assert len(rows) == 1
+    assert rows[0].sector == "半导体"
 
 
 def test_sample_skips_outside_session(session, monkeypatch) -> None:

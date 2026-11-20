@@ -463,17 +463,17 @@ def _market_overview(session: Session, sentiment: dict, pool: dict, cycle) -> li
     cards: list[dict] = []
     available = bool(sentiment.get("available"))
 
-    previous = latest_market(session)
+    previous = latest_market(session, before=date.today())
     prev_limit_up = previous.limit_up if previous is not None else None
     prev_limit_down = previous.limit_down if previous is not None else None
 
     limit_up = sentiment.get("limit_up") if available else None
     limit_down = sentiment.get("limit_down") if available else None
-    delta_up = f"较前值 {limit_up - prev_limit_up:+d}" if limit_up is not None and prev_limit_up is not None else "前值 —"
-    delta_down = f"较前值 {limit_down - prev_limit_down:+d}" if limit_down is not None and prev_limit_down is not None else "前值 —"
+    sub_up = f"昨日 {prev_limit_up} 只" if prev_limit_up is not None else "昨日 —"
+    sub_down = f"昨日 {prev_limit_down} 只" if prev_limit_down is not None else "昨日 —"
 
-    cards.append({"label": "涨停", "value": limit_up if limit_up is not None else "—", "sub": delta_up, "tone": "up"})
-    cards.append({"label": "跌停", "value": limit_down if limit_down is not None else "—", "sub": delta_down, "tone": "down"})
+    cards.append({"label": "涨停", "value": limit_up if limit_up is not None else "—", "sub": sub_up, "tone": "up"})
+    cards.append({"label": "跌停", "value": limit_down if limit_down is not None else "—", "sub": sub_down, "tone": "down"})
 
     stocks = pool.get("stocks") or []
     streak2 = sum(1 for row in stocks if int(row.get("streak") or 1) >= 2)

@@ -38,22 +38,18 @@
 <section class="panel sector-panel">
   <div class="panel-head">
     <div>
-      <h2>板块资金 · 分时累计</h2>
-      <p>每 5 分钟采样一次主力净流入（亿元），显示流入前 5 与流出前 5</p>
+      <h2>板块资金 · 最新快照</h2>
+      <p>每 3 分钟刷新一次，开盘自动清空重采；显示净流入前 5 与净流出前 5（亿元）</p>
     </div>
     {% if sector_chart.available %}
-    <span class="filter-hint">{{ sector_chart.samples }} 个采样点 · 更新至 {{ sector_chart.times[-1] }}</span>
+    <span class="filter-hint">更新至 {{ sector_chart.times[-1] }} · 当日 {{ sector_chart.samples }} 次采样</span>
     {% endif %}
   </div>
-  {% if sector_chart.available and sector_chart.samples >= 2 %}
+  {% if sector_chart.available %}
   <div id="sector-chart" class="chart chart-sector"></div>
-  {% elif sector_chart.available %}
-  <p class="muted empty-note">
-    已采样 1 次（{{ sector_chart.times[-1] }}），每 5 分钟一次，下一次采样后开始绘制曲线。
-  </p>
   {% else %}
   <p class="muted empty-note">
-    今天开始每 5 分钟采样，开盘后几分钟就会出现曲线；数据会随着交易时段逐步补全。
+    开盘后自动采样（每 3 分钟一次），首次采样后这里显示净流入 / 流出排行。
   </p>
   {% endif %}
 </section>
@@ -229,55 +225,45 @@
 
     const sectorEl = document.getElementById('sector-chart');
     if (sectorEl && sectorData.available && sectorData.series.length) {
+      const items = [...sectorData.inflow, ...sectorData.outflow].sort((a, b) => a.value - b.value);
       const chart = echarts.init(sectorEl);
       chart.setOption({
-        grid: { left: 8, right: 132, top: 18, bottom: 26, containLabel: true },
+        grid: { left: 8, right: 78, top: 10, bottom: 18, containLabel: true },
         tooltip: {
           trigger: 'axis',
+          axisPointer: { type: 'shadow' },
           valueFormatter: value => (value == null ? '—' : Number(value).toFixed(2) + ' 亿')
         },
         xAxis: {
-          type: 'category',
-          boundaryGap: false,
-          data: sectorData.times,
-          axisLine: { lineStyle: { color: '#e2e8f0' } },
-          axisTick: { show: false },
-          axisLabel: {
-            color: '#8a93a6',
-            interval: Math.max(0, Math.ceil(sectorData.times.length / 8))
-          }
-        },
-        yAxis: {
           type: 'value',
-          axisLabel: { color: '#8a93a6', formatter: '{value}' },
+          axisLabel: { color: '#8a93a6' },
           splitLine: { lineStyle: { color: '#eef1f7' } }
         },
-        series: sectorData.series.map((item, index) => ({
-          name: item.name,
-          type: 'line',
-          showSymbol: false,
-          lineStyle: { color: item.color, width: 2 },
-          itemStyle: { color: item.color },
-          data: item.data,
-          endLabel: {
-            show: true,
-            color: item.color,
-            fontSize: 11,
-            fontWeight: 600,
-            formatter: params => {
-              const value = Number(params.value);
-              return `${params.seriesName} ${value >= 0 ? '+' : ''}${value.toFixed(1)}亿`;
+        yAxis: {
+          type: 'category',
+          data: items.map(item => item.name),
+          axisLine: { show: false },
+          axisTick: { show: false },
+          axisLabel: { color: '#5d667a', fontSize: 11 }
+        },
+        series: [{
+          type: 'bar',
+          barWidth: 12,
+          data: items.map(item => ({
+            value: item.value,
+            itemStyle: {
+              color: item.value >= 0 ? '#e5484d' : '#12a150',
+              borderRadius: item.value >= 0 ? [0, 4, 4, 0] : [4, 0, 0, 4]
             }
-          },
-          emphasis: { focus: 'series' },
-          markLine: index === 0 ? {
-            silent: true,
-            symbol: 'none',
-            label: { show: false },
-            lineStyle: { color: '#cbd5e1', type: 'dashed' },
-            data: [{ yAxis: 0 }]
-          } : undefined
-        }))
+          })),
+          label: {
+            show: true,
+            position: 'right',
+            color: '#5d667a',
+            fontSize: 11,
+            formatter: params => `${params.value >= 0 ? '+' : ''}${Number(params.value).toFixed(1)}亿`
+          }
+        }]
       });
       window.addEventListener('resize', () => chart.resize());
     }
