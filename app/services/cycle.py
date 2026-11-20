@@ -379,6 +379,12 @@ def _points(value) -> str:
     return "—" if value is None else f"{float(value):+.1f}%"
 
 
+def peek() -> CycleState | None:
+    """只读进程内缓存，不触发计算（仪表盘用，避免页面被行情请求阻塞）。"""
+    with _cache_lock:
+        return _cache["data"]
+
+
 def reset_cache() -> None:
     with _cache_lock:
         _cache.update({"ts": 0.0, "date": None, "data": None})
@@ -392,6 +398,7 @@ __all__ = [
     "classify",
     "compute_cycle",
     "describe",
+    "peek",
     "reset_cache",
     "state_from_metrics",
     "temperature",

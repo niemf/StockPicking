@@ -14,49 +14,14 @@
   </div>
 </section>
 
-<section class="stat-grid">
-  {% if feature_holdings %}
-  <article class="stat-card">
-    <span class="stat-label">持仓总市值</span>
-    <strong class="stat-value">¥{{ totals.market_value | money }}</strong>
-    <span class="stat-sub">成本 ¥{{ totals.cost_value | money }} · {{ totals.count }} 只持仓</span>
+<section class="overview-grid">
+  {% for card in overview %}
+  <article class="overview-card">
+    <span class="overview-label">{{ card.label }}</span>
+    <strong class="overview-value {{ card.tone }}">{{ card.value }}</strong>
+    <span class="overview-sub">{{ card.sub }}</span>
   </article>
-  <article class="stat-card">
-    <span class="stat-label">浮动盈亏</span>
-    <strong class="stat-value {{ totals.trend }}">{{ totals.pnl | money }}</strong>
-    <span class="stat-sub {{ totals.trend }}">{{ totals.pnl_pct | pct }} · 今日 {{ totals.today_pnl | money }}</span>
-  </article>
-  {% endif %}
-  <article class="stat-card">
-    <span class="stat-label">涨跌家数</span>
-    {% if sentiment.available %}
-    <strong class="stat-value"><span class="up">{{ sentiment.up }}</span> / <span class="down">{{ sentiment.down }}</span></strong>
-    <span class="stat-sub">{{ sentiment.label }} · 中位数 {{ sentiment.median_pct | pct }} · 平盘 {{ sentiment.flat }}</span>
-    {% else %}
-    <strong class="stat-value muted">—</strong>
-    <span class="stat-sub">行情快照不可用</span>
-    {% endif %}
-  </article>
-  <article class="stat-card">
-    <span class="stat-label">涨停 / 跌停</span>
-    {% if sentiment.available %}
-    <strong class="stat-value"><span class="up">{{ sentiment.limit_up }}</span> / <span class="down">{{ sentiment.limit_down }}</span></strong>
-    <span class="stat-sub">成交 {{ sentiment.amount_yi }} 亿 · 涨超5% {{ sentiment.strong }} 只</span>
-    {% else %}
-    <strong class="stat-value muted">—</strong>
-    <span class="stat-sub">等待盘中快照</span>
-    {% endif %}
-  </article>
-  <article class="stat-card">
-    <span class="stat-label">今日预警</span>
-    <strong class="stat-value">{{ alert_total }}</strong>
-    <span class="stat-sub">{{ alert_counts.success }} 条止盈 · {{ alert_counts.warning }} 条趋势 · {{ alert_counts.info }} 条观察</span>
-  </article>
-  <article class="stat-card">
-    <span class="stat-label">自选股</span>
-    <strong class="stat-value">{{ watchlist_total }}</strong>
-    <span class="stat-sub">AI 候选 {{ ai_count }} 只 · 规则候选 {{ rule_count }} 只</span>
-  </article>
+  {% endfor %}
 </section>
 
 <section class="index-strip">
@@ -68,6 +33,29 @@
     <div class="index-source">实时 · {{ index.source }}</div>
   </article>
   {% endfor %}
+</section>
+
+<section class="panel sector-panel">
+  <div class="panel-head">
+    <div>
+      <h2>板块资金 · 分时累计</h2>
+      <p>每 5 分钟采样一次主力净流入（亿元），显示流入前 5 与流出前 5</p>
+    </div>
+    {% if sector_chart.available %}
+    <span class="filter-hint">{{ sector_chart.samples }} 个采样点 · 更新至 {{ sector_chart.times[-1] }}</span>
+    {% endif %}
+  </div>
+  {% if sector_chart.available and sector_chart.samples >= 2 %}
+  <div id="sector-chart" class="chart chart-sector"></div>
+  {% elif sector_chart.available %}
+  <p class="muted empty-note">
+    已采样 1 次（{{ sector_chart.times[-1] }}），每 5 分钟一次，下一次采样后开始绘制曲线。
+  </p>
+  {% else %}
+  <p class="muted empty-note">
+    今天开始每 5 分钟采样，开盘后几分钟就会出现曲线；数据会随着交易时段逐步补全。
+  </p>
+  {% endif %}
 </section>
 
 <div class="dashboard-grid">
@@ -130,39 +118,25 @@
     <section class="panel">
       <div class="panel-head">
         <div>
-          <h2>自选股观察</h2>
-          <p>建仓区间、推荐理由与风险提示</p>
+          <h2>今日预警</h2>
+          <p>盘中触发的关键信号 · 共 {{ alert_total }} 条</p>
         </div>
-        <a class="link" href="/watchlist">全部自选 →</a>
+        <a class="link" href="/alerts">全部预警 →</a>
       </div>
-      <div class="watch-grid compact">
-        {% for item in watchlist %}
-        <a class="watch-card" href="/stock/{{ item.code }}">
-          <div class="watch-top">
-            <div>
-              <strong>{{ item.name }}</strong>
-              <small>{{ item.code }} · {{ item.industry }}</small>
-            </div>
-            <span class="badge badge-{{ item.rating_class }}">{{ item.rating }}</span>
+      <div class="alert-list">
+        {% for alert in alerts %}
+        <div class="alert-row alert-{{ alert.level }}">
+          <span class="alert-time">{{ alert.time }}</span>
+          <div class="alert-body">
+            <strong>{{ alert.name }} <em>{{ alert.rule }}</em></strong>
+            <p>{{ alert.message }}</p>
           </div>
-          <div class="watch-price">
-            <span class="{{ item.trend }}">{{ item.price | price }}</span>
-            <span class="{{ item.trend }}">{{ item.pct_chg | pct }}</span>
-          </div>
-          {% if item.has_plan %}
-          <div class="watch-plan">
-            <div><span>建仓区间</span><strong>{{ item.buy_low | price }} ~ {{ item.buy_high | price }}</strong></div>
-            <div><span>止损 / 止盈</span><strong>{{ item.stop_loss | num2 }} / {{ item.take_profit | num2 }}</strong></div>
-          </div>
-          {% else %}
-          <div class="watch-plan">
-            <div><span>交易计划</span><strong class="muted">待生成</strong></div>
-          </div>
-          {% endif %}
-          <div class="zone-pill {{ item.zone_class }}">{{ item.zone_status }} · {{ item.distance_text }}</div>
-          <p class="watch-reason">{{ item.reason }}</p>
-        </a>
+          <span class="badge badge-{{ alert.level }}">{{ alert.status }}</span>
+        </div>
         {% endfor %}
+        {% if not alerts %}
+        <p class="muted empty-note">暂无预警事件。规则会在盘中轮询时自动生成并检查。</p>
+        {% endif %}
       </div>
     </section>
   </div>
@@ -219,31 +193,6 @@
       <div class="advice">{{ regime.position_advice }}</div>
     </section>
 
-    <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h2>今日预警</h2>
-          <p>盘中触发的关键信号</p>
-        </div>
-        <a class="link" href="/alerts">全部预警 →</a>
-      </div>
-      <div class="alert-list">
-        {% for alert in alerts %}
-        <div class="alert-row alert-{{ alert.level }}">
-          <span class="alert-time">{{ alert.time }}</span>
-          <div class="alert-body">
-            <strong>{{ alert.name }} <em>{{ alert.rule }}</em></strong>
-            <p>{{ alert.message }}</p>
-          </div>
-          <span class="badge badge-{{ alert.level }}">{{ alert.status }}</span>
-        </div>
-        {% endfor %}
-        {% if not alerts %}
-        <p class="muted empty-note">暂无预警事件。规则会在盘中轮询时自动生成并检查。</p>
-        {% endif %}
-      </div>
-    </section>
-
     {% if feature_holdings %}
     <section class="panel">
       <div class="panel-head">
@@ -273,9 +222,65 @@
 <script>
   const allocation = {{ allocation | tojson }};
   const pnlBars = {{ pnl_bars | tojson }};
+  const sectorData = {{ sector_chart | tojson }};
 
   function initCharts() {
     if (!window.echarts) return;
+
+    const sectorEl = document.getElementById('sector-chart');
+    if (sectorEl && sectorData.available && sectorData.series.length) {
+      const chart = echarts.init(sectorEl);
+      chart.setOption({
+        grid: { left: 8, right: 132, top: 18, bottom: 26, containLabel: true },
+        tooltip: {
+          trigger: 'axis',
+          valueFormatter: value => (value == null ? '—' : Number(value).toFixed(2) + ' 亿')
+        },
+        xAxis: {
+          type: 'category',
+          boundaryGap: false,
+          data: sectorData.times,
+          axisLine: { lineStyle: { color: '#e2e8f0' } },
+          axisTick: { show: false },
+          axisLabel: {
+            color: '#8a93a6',
+            interval: Math.max(0, Math.ceil(sectorData.times.length / 8))
+          }
+        },
+        yAxis: {
+          type: 'value',
+          axisLabel: { color: '#8a93a6', formatter: '{value}' },
+          splitLine: { lineStyle: { color: '#eef1f7' } }
+        },
+        series: sectorData.series.map((item, index) => ({
+          name: item.name,
+          type: 'line',
+          showSymbol: false,
+          lineStyle: { color: item.color, width: 2 },
+          itemStyle: { color: item.color },
+          data: item.data,
+          endLabel: {
+            show: true,
+            color: item.color,
+            fontSize: 11,
+            fontWeight: 600,
+            formatter: params => {
+              const value = Number(params.value);
+              return `${params.seriesName} ${value >= 0 ? '+' : ''}${value.toFixed(1)}亿`;
+            }
+          },
+          emphasis: { focus: 'series' },
+          markLine: index === 0 ? {
+            silent: true,
+            symbol: 'none',
+            label: { show: false },
+            lineStyle: { color: '#cbd5e1', type: 'dashed' },
+            data: [{ yAxis: 0 }]
+          } : undefined
+        }))
+      });
+      window.addEventListener('resize', () => chart.resize());
+    }
 
     const pieEl = document.getElementById('allocation-chart');
     if (pieEl) {

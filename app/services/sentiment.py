@@ -73,6 +73,10 @@ def compute(quotes: dict[str, Quote]) -> dict:
     limit_down = sum(1 for q in valid if _is_limit_down(q))
     strong = sum(1 for q in valid if q.pct_chg >= 5)
     weak = sum(1 for q in valid if q.pct_chg <= -5)
+    # 炸板率：盘中触及涨停但收盘没封住的比例
+    touched = [q for q in valid if q.limit_up > 0 and q.high >= q.limit_up * 0.999]
+    sealed = [q for q in touched if q.price >= q.limit_up * 0.999]
+    break_rate = (1 - len(sealed) / len(touched)) if touched else None
     amount = sum(q.amount for q in valid)
     changes = [q.pct_chg for q in valid]
     median = statistics.median(changes)
@@ -87,6 +91,9 @@ def compute(quotes: dict[str, Quote]) -> dict:
         "flat": flat,
         "limit_up": limit_up,
         "limit_down": limit_down,
+        "touched": len(touched),
+        "sealed": len(sealed),
+        "break_rate": round(break_rate, 3) if break_rate is not None else None,
         "strong": strong,
         "weak": weak,
         "breadth": round(breadth, 1),

@@ -44,6 +44,7 @@ EXPECTED_TABLES = {
     "market_regime",
     "market_daily",
     "signal_log",
+    "sector_flow_sample",
     "trade_calendar",
     "job_run",
 }

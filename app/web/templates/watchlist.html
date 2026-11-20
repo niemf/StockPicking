@@ -71,7 +71,7 @@
 {% if items %}
 <section class="watch-grid">
   {% for item in items %}
-  <article class="watch-card detailed">
+  <article class="watch-card compact">
     <div class="watch-top">
       <div class="watch-title">
         <div class="watch-name-row">
@@ -90,24 +90,12 @@
           · {{ item.fundamental.score }}
         </span>
         {% endif %}
-        <span class="badge badge-source">{{ item.source }}</span>
         <span class="badge badge-group">{{ item.group }}</span>
       </div>
     </div>
 
-    {% if item.fundamental %}
-    <div class="fund-strip {{ item.fundamental.verdict }}">
-      {% for tag in item.fundamental.tags[:4] %}<span class="fund-tag">{{ tag }}</span>{% endfor %}
-      {% for risk in item.fundamental.risks[:2] %}<span class="fund-risk">⚠ {{ risk }}</span>{% endfor %}
-      <form method="post" action="/watchlist/{{ item.code }}/fundamental">
-        <button class="btn btn-ghost btn-xs" type="submit">刷新</button>
-      </form>
-    </div>
-    {% else %}
-    <form method="post" action="/watchlist/{{ item.code }}/fundamental" class="fund-action">
-      <button class="btn btn-ghost btn-xs" type="submit">AI 基本面</button>
-      <span class="field-hint">加自选后自动分析，每天一次</span>
-    </form>
+    {% if item.fundamental and item.fundamental.tags %}
+    <p class="fund-line">{{ item.fundamental.tags[:3] | join(' · ') }}</p>
     {% endif %}
 
     <div class="watch-price-row">
@@ -119,17 +107,9 @@
     </div>
 
     {% if item.tech and item.tech.available %}
-    <div class="info-box verdict-box {{ item.tech.verdict_class }}">
-      <div class="info-grid">
-        <div>
-          <span>结论</span>
-          <strong class="verdict-value">{{ item.tech.verdict }}</strong>
-        </div>
-        <div>
-          <span>评分 / 趋势</span>
-          <strong>{{ '%+d' | format(item.tech.score) }} · {{ item.tech.trend }}</strong>
-        </div>
-      </div>
+    <div class="compact-verdict">
+      <span class="verdict-tag {{ item.tech.verdict_class }}">{{ item.tech.verdict }}</span>
+      <strong class="verdict-score">{{ '%+d' | format(item.tech.score) }} · {{ item.tech.trend }}</strong>
       <div class="signal-chips">
         {% for signal in item.tech.key_signals[:2] %}
         <span class="signal-chip {{ 'bull' if signal.weight > 0 else 'bear' }}">
@@ -138,42 +118,51 @@
         {% endfor %}
       </div>
     </div>
-
-    <div class="info-box">
-      <div class="info-grid">
-        <div>
-          <span>MA20</span>
-          <strong>{{ item.tech.ma20 | num2 }}{% if item.tech.ma20_dist is not none %}<small>{{ item.tech.ma20_dist | pct }}</small>{% endif %}</strong>
-        </div>
-        <div>
-          <span>MA60</span>
-          <strong>{{ item.tech.ma60 | num2 }}</strong>
-        </div>
-        <div><span>支撑</span><strong class="up">{{ item.tech.support | num2 }}</strong></div>
-        <div><span>压力</span><strong class="down">{{ item.tech.resistance | num2 }}</strong></div>
-        <div><span>筹码密集区</span><strong>{{ item.tech.dense_low | num2 }}–{{ item.tech.dense_high | num2 }}</strong></div>
-        <div><span>量比 / RSI</span><strong>{{ item.tech.volume_ratio | num2 }} / {{ item.tech.rsi12 | num2 }}</strong></div>
-      </div>
-    </div>
     {% endif %}
 
     {% if item.has_plan %}
-    <div class="plan-grid">
+    <div class="plan-grid compact">
       <div><span>建仓区间</span><strong>{{ item.buy_low | price }} ~ {{ item.buy_high | price }}</strong></div>
       <div><span>止损</span><strong class="down">{{ item.stop_loss | num2 }}</strong></div>
       <div><span>止盈</span><strong class="up">{{ item.take_profit | num2 }}</strong></div>
-      <div><span>建议仓位</span><strong>{{ item.position_pct | num2 }}{% if item.position_pct is not none %}%{% endif %}</strong></div>
     </div>
     {% endif %}
 
-    <details class="ai-details">
+    <div class="watch-footer">
+      <span class="muted">
+        {{ item.distance_text }}
+        {% if item.risk_reward is not none %}· 盈亏比 {{ '%.2f' | format(item.risk_reward) }}{% endif %}
+      </span>
+      <span class="watch-actions">
+        <a class="btn btn-ghost btn-xs" href="/stock/{{ item.code }}">详情 →</a>
+        <form method="post" action="/watchlist/{{ item.id }}/delete"
+              onsubmit="return confirm('确认从自选移除 {{ item.name }}？');">
+          <button class="btn btn-danger btn-xs" type="submit">移除</button>
+        </form>
+      </span>
+    </div>
+
+    <details class="ai-details compact">
       <summary>
         {% if item.report_card %}
-        AI 研报卡：{{ item.report_card.conclusion }} · {{ item.report_card.score }} 分（{{ item.report_card.trade_date }}）
+        AI 研报卡：{{ item.report_card.conclusion }} · {{ item.report_card.score }} 分
         {% else %}
-        AI 深度研报（可选，约 ¥0.005）
+        AI 研报 / 基本面
         {% endif %}
       </summary>
+      {% if not item.fundamental %}
+      <form method="post" action="/watchlist/{{ item.code }}/fundamental" class="fund-action">
+        <button class="btn btn-ghost btn-xs" type="submit">AI 基本面（约 ¥0.005）</button>
+      </form>
+      {% else %}
+      <div class="fund-strip {{ item.fundamental.verdict }}">
+        {% for tag in item.fundamental.tags[:4] %}<span class="fund-tag">{{ tag }}</span>{% endfor %}
+        {% for risk in item.fundamental.risks[:2] %}<span class="fund-risk">⚠ {{ risk }}</span>{% endfor %}
+        <form method="post" action="/watchlist/{{ item.code }}/fundamental">
+          <button class="btn btn-ghost btn-xs" type="submit">刷新</button>
+        </form>
+      </div>
+      {% endif %}
       {% if item.report_card %}
       <p>{{ item.report_card.summary | truncate(180, True, '…') }}</p>
       <div class="ai-actions">
@@ -189,20 +178,6 @@
       </form>
       {% endif %}
     </details>
-
-    <div class="watch-footer">
-      <span class="muted">
-        {{ item.distance_text }}
-        {% if item.risk_reward is not none %}· 盈亏比 {{ '%.2f' | format(item.risk_reward) }}{% endif %}
-      </span>
-      <span class="watch-actions">
-        <a class="btn btn-ghost btn-xs" href="/stock/{{ item.code }}">查看分析 →</a>
-        <form method="post" action="/watchlist/{{ item.id }}/delete"
-              onsubmit="return confirm('确认从自选移除 {{ item.name }}？');">
-          <button class="btn btn-danger btn-xs" type="submit">移除</button>
-        </form>
-      </span>
-    </div>
   </article>
   {% endfor %}
 </section>

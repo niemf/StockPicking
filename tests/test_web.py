@@ -242,8 +242,9 @@ def test_watchlist_card_shows_tech_and_latest_report(client, monkeypatch) -> Non
     assert "看多" in response.text
     assert "+6 · 多头排列" in response.text
     assert "MA20" in response.text
-    assert "支撑" in response.text and "压力" in response.text
-    assert "密集区" in response.text
+    # 精简卡片只保留核心信息，支撑/压力/密集区已移到个股详情页
+    assert "详情 →" in response.text
+    assert "密集区" not in response.text
     assert "AI 研报卡：看多" in response.text
     assert "站上 MA20" in response.text
     assert "站上 MA20，量能温和" in response.text

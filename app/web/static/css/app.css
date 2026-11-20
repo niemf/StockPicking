@@ -661,6 +661,118 @@ a.watch-card:hover {
   padding: 20px;
 }
 
+/* 精简卡片：高度约为原详细卡片的一半 */
+.watch-card.compact {
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.watch-card.compact .watch-title strong {
+  font-size: 14px;
+}
+
+.watch-card.compact .watch-code {
+  font-size: 10.5px;
+}
+
+.watch-card.compact .watch-price-row {
+  margin: 0;
+}
+
+.watch-card.compact .big-price {
+  font-size: 19px;
+}
+
+.watch-card.compact .badge {
+  font-size: 9.5px;
+  padding: 1px 6px;
+}
+
+.fund-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.compact-verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: #f8fafd;
+  border: 1px solid #e6ecf5;
+}
+
+.compact-verdict .verdict-tag {
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.verdict-tag.up {
+  background: #fdecec;
+  color: #b42326;
+}
+
+.verdict-tag.down {
+  background: #e8f5ec;
+  color: #15803d;
+}
+
+.verdict-tag.neutral {
+  background: #eef2f9;
+  color: #4b5568;
+}
+
+.compact-verdict .verdict-score {
+  font-size: 13px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.compact-verdict .signal-chips {
+  margin: 0;
+  gap: 3px;
+}
+
+.compact-verdict .signal-chip {
+  font-size: 9.5px;
+  padding: 1px 5px;
+}
+
+.plan-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 8px;
+  padding: 6px 8px;
+}
+
+.plan-grid.compact span {
+  font-size: 9.5px;
+}
+
+.plan-grid.compact strong {
+  font-size: 11.5px;
+}
+
+.watch-card.compact .watch-footer {
+  margin-top: 0;
+  font-size: 10.5px;
+}
+
+.watch-card.compact .ai-details {
+  margin-top: 0;
+}
+
+.watch-card.compact .ai-details summary {
+  font-size: 10.5px;
+}
+
 .watch-top {
   display: flex;
   align-items: flex-start;
@@ -1046,6 +1158,68 @@ a.watch-card:hover {
 
 .chart-lg {
   height: 430px;
+}
+
+.chart-sector {
+  height: 340px;
+}
+
+/* ------------------------------------------------------------------ 盘面总览 */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1100px) {
+  .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.overview-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.overview-value {
+  color: #1f2937;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-value.up {
+  color: #c62828;
+}
+
+.overview-value.down {
+  color: #2e7d32;
+}
+
+.overview-sub {
+  color: var(--muted);
+  font-size: 10.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sector-panel .chart-sector {
+  margin-top: 4px;
 }
 
 /* ------------------------------------------------------------------ holdings */

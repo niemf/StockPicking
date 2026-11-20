@@ -250,6 +250,24 @@ async def monitor_loop(stop_event: asyncio.Event) -> None:
         # thread keeps page requests responsive while a poll is in flight.
         with SessionLocal() as session:
             run_once(session)
+            _sample_market(session)
+
+    def _sample_market(session) -> None:
+        """每 5 分钟采一次板块资金，并顺手刷新情绪周期缓存（供仪表盘直接读）。"""
+        from app.services.cycle import compute_cycle
+        from app.services.sector_flow import sample as sample_sectors
+
+        try:
+            written = sample_sectors(session)
+        except Exception as exc:  # noqa: BLE001 - 采样失败不影响预警
+            logger.warning("sector flow sample failed: {}", exc)
+            return
+        if not written:
+            return
+        try:
+            compute_cycle(session, refresh=True)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("cycle refresh failed: {}", exc)
 
     await asyncio.to_thread(_bootstrap)
     logger.info("monitor loop started (interval={}s)", settings.poll_interval_seconds)

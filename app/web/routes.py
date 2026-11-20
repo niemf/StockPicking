@@ -40,6 +40,10 @@ from app.web.funnel import build as build_funnel
 from app.services.indicators import load_weekly_map
 from app.services.fundamentals import latest_map
 from app.services.limit_board import get_lhb_seats, get_limit_pool
+from app.services.cycle import PHASE_META
+from app.services.cycle import peek as peek_cycle
+from app.services.market_daily import latest as latest_market
+from app.services.sector_flow import intraday_series
 from app.services.market_flow import get_lhb, get_sector_flow, get_stock_fund_flow
 from app.services.notifier import condition_text
 from app.services.sentiment import market_sentiment
@@ -454,23 +458,118 @@ def _real_chart_payload(db: Session, code: str, limit: int = 120) -> dict | None
 
 
 # ------------------------------------------------------------------ pages
+def _market_overview(session: Session, sentiment: dict, pool: dict, cycle) -> list[dict]:
+    """仪表盘顶部的盘面总览卡片（只用本地已有数据）。"""
+    cards: list[dict] = []
+    available = bool(sentiment.get("available"))
+
+    previous = latest_market(session)
+    prev_limit_up = previous.limit_up if previous is not None else None
+    prev_limit_down = previous.limit_down if previous is not None else None
+
+    limit_up = sentiment.get("limit_up") if available else None
+    limit_down = sentiment.get("limit_down") if available else None
+    delta_up = f"较前值 {limit_up - prev_limit_up:+d}" if limit_up is not None and prev_limit_up is not None else "前值 —"
+    delta_down = f"较前值 {limit_down - prev_limit_down:+d}" if limit_down is not None and prev_limit_down is not None else "前值 —"
+
+    cards.append({"label": "涨停", "value": limit_up if limit_up is not None else "—", "sub": delta_up, "tone": "up"})
+    cards.append({"label": "跌停", "value": limit_down if limit_down is not None else "—", "sub": delta_down, "tone": "down"})
+
+    stocks = pool.get("stocks") or []
+    streak2 = sum(1 for row in stocks if int(row.get("streak") or 1) >= 2)
+    max_streak = pool.get("max_streak")
+    if stocks:
+        cards.append({
+            "label": "连板",
+            "value": streak2,
+            "sub": f"最高 {max_streak} 板 · 首板 {pool.get('first_boards') or 0}",
+            "tone": "up",
+        })
+    else:
+        cards.append({"label": "连板", "value": "—", "sub": "涨停池未就绪", "tone": ""})
+
+    break_rate = sentiment.get("break_rate")
+    touched = sentiment.get("touched")
+    if break_rate is not None and touched:
+        sealed_rate = (1 - break_rate) * 100
+        cards.append({
+            "label": "封板率",
+            "value": f"{sealed_rate:.1f}%",
+            "sub": f"炸板率 {break_rate * 100:.1f}% · 触板 {touched}",
+            "tone": "up" if sealed_rate >= 70 else "down",
+        })
+    else:
+        cards.append({"label": "封板率", "value": "—", "sub": "等待盘中快照", "tone": ""})
+
+    if available:
+        cards.append({
+            "label": "上涨 / 下跌",
+            "value": f"{sentiment['up']} / {sentiment['down']}",
+            "sub": f"红盘率 {sentiment['breadth']:.0f}% · 中位数 {sentiment['median_pct']:+.2f}%",
+            "tone": "up" if sentiment["breadth"] >= 50 else "down",
+        })
+        cards.append({
+            "label": "两市成交",
+            "value": f"{sentiment['amount_yi']:.0f} 亿",
+            "sub": f"涨超5% {sentiment['strong']} · 跌超5% {sentiment['weak']}",
+            "tone": "",
+        })
+    else:
+        cards.append({"label": "上涨 / 下跌", "value": "—", "sub": "行情快照不可用", "tone": ""})
+        cards.append({"label": "两市成交", "value": "—", "sub": "行情快照不可用", "tone": ""})
+
+    metrics = (cycle.metrics if cycle is not None else {}) or {}
+    premium = metrics.get("prev_premium")
+    cards.append({
+        "label": "昨涨停溢价",
+        "value": f"{premium:+.2f}%" if premium is not None else "—",
+        "sub": f"昨涨停 {metrics.get('prev_limit_count') or 0} 只",
+        "tone": "up" if (premium or 0) > 0 else ("down" if premium is not None else ""),
+    })
+
+    if cycle is not None:
+        cards.append({
+            "label": "情绪周期",
+            "value": cycle.label,
+            "sub": f"温度 {cycle.temperature:.0f} · 仓位 ≤{cycle.position_cap}%",
+            "tone": "up" if cycle.phase in {"ferment", "repair"} else "down",
+        })
+    elif previous is not None and previous.phase:
+        label = PHASE_META.get(previous.phase, {}).get("label", previous.phase)
+        cards.append({
+            "label": "情绪周期",
+            "value": label,
+            "sub": f"昨收 · 温度 {previous.temperature or 0:.0f}",
+            "tone": "",
+        })
+    else:
+        cards.append({"label": "情绪周期", "value": "—", "sub": "等待盘中计算", "tone": ""})
+
+    return cards
+
+
 @router.get("/")
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    watch_rows = watch_items(db)
     holding_rows = holding_items(db)
-    codes = {row["code"] for row in watch_rows} | {row["code"] for row in holding_rows}
+    codes = {row["code"] for row in holding_rows}
     quotes = quote_service.get_quotes(codes) if codes else {}
-    watchlist = _build_watchlist(watch_rows, quotes)
     holdings = _build_holdings(holding_rows, quotes)
     totals = _totals(holdings)
     indices = _build_indices()
     sentiment = market_sentiment(db, quote_service=quote_service)
+    cycle = peek_cycle()
+    try:
+        pool = get_limit_pool(date.today())
+    except Exception as exc:  # noqa: BLE001 - 涨停池失败不影响仪表盘
+        logger.warning("limit pool unavailable for dashboard: {}", exc)
+        pool = {}
+    overview = _market_overview(db, sentiment, pool, cycle)
+    sector_chart = intraday_series(db, date.today())
 
     allocation = [
         {"name": item["name"], "value": round(item["market_value"], 2)} for item in holdings
     ]
     pnl_bars = [{"name": item["name"], "value": round(item["pnl"], 2)} for item in holdings]
-    ai_count = sum(1 for item in watchlist if item["source"] == "AI 候选")
     alert_items = _alert_items(db, limit=10)
     alert_counts = _alert_counts(alert_items)
     today_start = datetime.combine(date.today(), time.min)
@@ -492,10 +591,9 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             "regime": MARKET_REGIME,
             "indices": indices,
             "sentiment": sentiment,
-            "watchlist": watchlist[:4],
-            "watchlist_total": len(watchlist),
-            "ai_count": ai_count,
-            "rule_count": len(watchlist) - ai_count,
+            "overview": overview,
+            "cycle": cycle,
+            "sector_chart": sector_chart,
             "holdings": holdings,
             "totals": totals,
             "alerts": alert_items,

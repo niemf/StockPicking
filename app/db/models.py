@@ -492,6 +492,21 @@ class MarketDaily(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
 
+class SectorFlowSample(Base):
+    """板块资金分时采样：每 5 分钟一次，用于画「流入前5/流出前5」累计曲线。"""
+
+    __tablename__ = "sector_flow_sample"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    trade_date: Mapped[date] = mapped_column(Date, index=True)
+    ts: Mapped[datetime] = mapped_column(DateTime, index=True)
+    sector: Mapped[str] = mapped_column(String(32))
+    net_inflow: Mapped[float | None] = mapped_column(Float, default=None)  # 亿元
+    pct_chg: Mapped[float | None] = mapped_column(Float, default=None)
+
+    __table_args__ = (UniqueConstraint("ts", "sector", name="uq_sector_sample_ts"),)
+
+
 class SignalLog(Base):
     """候选/预警的结果跟踪：T+1 / T+3 / T+5、最大浮盈浮亏、止损目标命中。
 
@@ -603,6 +618,7 @@ __all__ = [
     "NotificationLog",
     "Quote",
     "ReviewReport",
+    "SectorFlowSample",
     "SignalLog",
     "Stock",
     "TradePlan",
